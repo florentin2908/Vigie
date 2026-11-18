@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.19",
+      "date": "18 nov. 2026",
+      "items": [
+        "Scan 3D premium : ta voiture est peinte une fois pour toutes avec les 72 images de ta vidéo, en haute définition (texture de 2048 px calculée sur ton téléphone)",
+        "Les vitres sont reconnues : elles restent sombres comme du vrai verre teinté et reflètent le studio",
+        "Les reflets du décor ne restent plus collés sur la carrosserie : la peinture garde sa vraie couleur et le vernis brille en temps réel",
+        "Vraies roues : Vigie les repère là où les pneus touchent le sol, creuse les passages de roue et pose des pneus avec tes jantes",
+        "Une voiture scannée avec une version précédente garde l'ancien rendu : refais le scan pour profiter du nouveau"
+      ]
+    },
+    {
       "version": "0.18",
       "date": "18 nov. 2026",
       "items": [

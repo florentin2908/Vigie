@@ -53,7 +53,7 @@ window.__run = async () => {
   for (const a of [0, 45, 90, 200]) { const d = 8, rad = a * Math.PI / 180; cam.position.set(Math.cos(rad) * d, 2.2, Math.sin(rad) * d); cam.lookAt(0, .6, 0); r.render(sc, cam); views.push(cv.toDataURL('image/png')); }
   const D = rec.debug;
   return { quality: rec.quality, dims: rec.dims, durations, triangles: obj.triangles, views,
-           poses: D.poses, heading: D.heading, top: D.top, side: D.side, times: D.ctimes, theta: D.theta, ok: D.ok, vis: D.vis, dist: D.dist, steps: D.steps, peaks: D.peaks, atlasKB: Math.round(rec.atlas.size / 1024), masks: D.masks, SW: D.SW, SH: D.SH };
+           poses: D.poses, heading: D.heading, top: D.top, side: D.side, times: D.ctimes, theta: D.theta, ok: D.ok, vis: D.vis, dist: D.dist, steps: D.steps, peaks: D.peaks, atlasKB: Math.round((rec.tex || rec.atlas).size / 1024), version: rec.v, bake: rec.quality && rec.quality.bake, masks: D.masks, SW: D.SW, SH: D.SH };
 };
 window.__ready = true;
 </script></body></html>"""
@@ -135,7 +135,7 @@ async def main():
         n = int(len(res['top']) ** .5); a = _I.new('L', (n, n)); a.putdata([255 if v else 0 for v in res['top']]); b = _I.new('L', (n, n)); b.putdata([255 if v else 0 for v in res['side']])
         sh = _I.new('L', (n * 2 + 4, n)); sh.paste(a, (0, 0)); sh.paste(b, (n + 4, 0)); sh.resize(((n * 2 + 4) * 3, n * 3)).save(os.path.join(OUT, 'forme-dessus-cote.png'))
     rep['debug'] = {'poses': res.get('poses'), 'heading': res.get('heading'), 'theta': res['theta'], 'dist': res['dist'], 'vis': res['vis'], 'steps': res['steps'], 'peaks': res['peaks']}
-    rep.update({'qualite': res['quality'], 'durees_ms': res['durations'], 'triangles': res['triangles'], 'atlas_ko': res['atlasKB'],
+    rep.update({'qualite': res['quality'], 'durees_ms': res['durations'], 'triangles': res['triangles'], 'atlas_ko': res['atlasKB'], 'version': res.get('version'), 'cuisson': res.get('bake'),
                 'angle_erreur_moy_deg': round(sum(errs) / len(errs), 1), 'angle_erreur_max_deg': round(max(errs), 1),
                 'angle_erreur_moy_sens_inverse_deg': round(sum(errs2) / len(errs2), 1),
                 'dims_scan': {k: round(v, 2) for k, v in D.items()}, 'dims_vraies': {k: round(v, 2) for k, v in T.items()},

@@ -3518,7 +3518,7 @@ spinUI();
 // window.__scanRecP : la voiture scannée (ou null), attendue par l'intro pour montrer ta vraie voiture dès le lancement
 window.__scanRecP=Promise.all([spinGet().catch(()=>null),scanGet().catch(()=>null)]).then(([rec,sc])=>{
   if(rec&&Array.isArray(rec.frames)&&rec.frames.length>=8)spinSet(rec);
-  if(sc&&sc.disp&&sc.atlas&&sc.views)scanSet(sc);
+  if(sc&&(sc.mesh&&sc.tex||sc.disp&&sc.atlas&&sc.views))scanSet(sc);
 }).catch(()=>{}).then(()=>{SPIN.loaded=true;spinUI();setStageView(viewPref,false);return SCAN.on&&SCAN.rec?SCAN.rec:null;});
 
 /* ---------- Raccourcis de l'accueil ---------- */
@@ -3703,7 +3703,7 @@ const WHEELS={fl:[0,0],fr:[0,0],rl:[0,0],rr:[0,0]};
 function useT(t){T=t;WR=T.WR;AR=WR+.11;HALF=T.half;WZ=HALF-.15;WHEELS.fl=[T.wf,-WZ];WHEELS.fr=[T.wf,WZ];WHEELS.rl=[T.wr,-WZ];WHEELS.rr=[T.wr,WZ];}
 function useBody(k){useT(BODY[k]||BODY.citadine);}
 // Voiture scannée : mêmes repères que les dessins (longueur, largeur, hauteur) pour le cadrage, l'ombre et les anneaux de pneus
-function useDims(d){const L=cl(d.L,2.5,7),W=cl(d.W,1.2,2.6),H=cl(d.H,1,2.8);useT(Object.assign({},BODY.citadine,{F:L/2,R:-L/2,half:W/2,roof:H,wf:L*.31,wr:-L*.31,WR:.32}));}
+function useDims(d){const L=cl(d.L,2.5,7),W=cl(d.W,1.2,2.6),H=cl(d.H,1,2.8);useT(Object.assign({},BODY.citadine,{F:L/2,R:-L/2,half:W/2,roof:H,wf:d.wf!=null?d.wf:L*.31,wr:d.wr!=null?d.wr:-L*.31,WR:.32}));} // roues repérées par le scan (v0.19)
 useBody('citadine');
 function bodyShape(){
   const {F,R,b,wf,wr,belt,beltR,hoodX,noseY}=T;
@@ -3937,6 +3937,7 @@ function scanBuild(rec){
 function scanForget(o){if(o&&SCANX.obj===(o.orig||o)){SCANX.key='';SCANX.p=null;SCANX.obj=null;}}
 // Copie pour l'appli (l'intro garde l'original) : même forme et mêmes images, matériau à part ; pas d'attente entre les deux
 function scanCopy(o){
+  if(o.copy)return o.copy();   // v0.19 : matériau physique (sa propre copie)
   const m=o.material.clone(),u=m.uniforms,src=o.material.uniforms;
   u.uTex.value=src.uTex.value;u.uMask.value=src.uMask.value;u.uReveal.value=99;u.uScan.value=0;u.uOpacity.value=1;
   const group=new THREE.Group();group.add(new THREE.Mesh(o.group.children[0].geometry,m));
@@ -3979,7 +3980,7 @@ function introScene(renderer,so){
   if(so){
     // Ta voiture scannée, révélée par un faisceau de scanner qui monte du sol au toit
     useDims(so.dims);car=so;scene.add(so.group);fx={group:new THREE.Group()};scene.add(fx.group); // ombre et anneaux à part : l'objet reste intact pour l'appli
-    U=so.material.uniforms;U.uReveal.value=RM?99:-.1;U.uScan.value=RM?0:1;
+    U=so.reveal||so.material.uniforms;U.uReveal.value=RM?99:-.1;U.uScan.value=RM?0:1;
     ring=new THREE.Mesh(new THREE.RingGeometry(.965,1,160),new THREE.MeshBasicMaterial({color:0x9fe9ff,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));
     ring.rotation.x=-Math.PI/2;ring.scale.set((T.F-T.R)/2+.35,HALF+.35,1);scene.add(ring);
     window.VigieState.introCar='scan';
@@ -4098,7 +4099,7 @@ function runApp(){
   // Voiture scannée (v0.15) : préparée en arrière-plan (maillage + peinture), le dessin Vigie reste affiché d'ici là
   const SC={pending:'',failed:'',ready:null},born=performance.now();
   const scanWanted=s=>s.scanOn&&s.scanRec&&s.scanRec.date?'scan:'+s.scanRec.date:'';
-  const scanTexDispose=o=>{const u=o&&o.material&&o.material.uniforms;if(u){if(u.uTex.value)u.uTex.value.dispose();if(u.uMask.value)u.uMask.value.dispose();}};
+  const scanTexDispose=o=>{if(o&&o.disposeTex){o.disposeTex();return;}const u=o&&o.material&&o.material.uniforms;if(u){if(u.uTex.value)u.uTex.value.dispose();if(u.uMask.value)u.uMask.value.dispose();}};
   function scanPrep(k,rec){
     if(SC.pending===k||SC.failed===k||(SC.ready&&SC.ready.key===k))return;
     SC.pending=k;window.VigieState.scan3d={state:'prépa'};
