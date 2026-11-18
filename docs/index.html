@@ -817,7 +817,7 @@ main::-webkit-scrollbar{display:none}
 .gl-host canvas{display:block;width:100%;height:100%;outline:none;opacity:0;transition:opacity .6s var(--ease)}
 body.gl .gl-host canvas{opacity:1}
 .svgfb{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;transition:opacity .4s,visibility 0s .4s}
-body.gl .svgfb{opacity:0;visibility:hidden}
+body.gl .svgfb,body.has-scan .svgfb{opacity:0;visibility:hidden} /* ta voiture scannée arrive : pas de silhouette dessinée en attendant */
 .svgfb svg{width:86%;max-width:420px}
 .stage-tag{position:absolute;left:16px;top:14px;font:600 10.5px var(--mono);letter-spacing:.16em;color:rgba(var(--acc-rgb),.85);text-transform:uppercase;pointer-events:none}
 .stage-tag b{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:7px;vertical-align:1px;box-shadow:0 0 8px var(--accent);animation:breathe 1.6s ease-in-out infinite}
@@ -3435,7 +3435,7 @@ const SPIN_MSG={
 /* ---------- Scan 3D (v0.15) : la vidéo du tour → la vraie voiture en 3D (site/scan3d.js, calculé sur l'appareil) ----------
    Le scan fournit aussi les 36 images de la vue 360°. S'il échoue (pas de voiture reconnue, vidéo trop courte, détourage
    introuvable hors ligne), la vue 360° est faite quand même et la raison s'affiche sous la carte (pas en erreur). */
-function scanSet(rec){SCAN.rec=rec||null;window.VigieState.scanRec=SCAN.rec;window.VigieState.scanOn=!!SCAN.rec&&SCAN.on;try{update();}catch(e){}}
+function scanSet(rec){SCAN.rec=rec||null;window.VigieState.scanRec=SCAN.rec;window.VigieState.scanOn=!!SCAN.rec&&SCAN.on;document.body.classList.toggle('has-scan',window.VigieState.scanOn);try{update();}catch(e){}}
 const SCAN_STEPS={frames:['Lecture de la vidéo',0,.3],model:['Chargement du détourage',.3,.05],mask:['Détourage de ta voiture',.35,.35],pose:['Calcul de ton tour',.7,.1],carve:['Sculpture de la forme en 3D',.8,.1],paint:['Peinture avec tes images',.9,.1]};
 const SCAN_ORDER=Object.keys(SCAN_STEPS);
 function scanProg(stage,k){const s=SCAN_STEPS[stage];if(!s)return;spinProg(s[1]+s[2]*clamp(k,0,1),`Étape ${SCAN_ORDER.indexOf(stage)+1} sur ${SCAN_ORDER.length} · ${s[0]}…`);}
@@ -3502,10 +3502,11 @@ $('#scan-on').addEventListener('change',e=>{
 window.VigieSpin={state:()=>({n:SPIN.n,busy:SPIN.busy,ms:SPIN.ms,view:stageView,loaded:SPIN.loaded,src:SPIN.src,scan:!!SCAN.rec,scanOn:SCAN.on,scanMs:SCAN.ms,scanNote:SCAN.note,scanQ:SCAN.rec&&SCAN.rec.quality,scanDims:SCAN.rec&&SCAN.rec.dims}),homeAngle:()=>homeSpin.angle(),homeFrame:()=>homeSpin.frame()};
 spinUI();
 // Au démarrage : la vue 360° et le scan 3D viennent d'IndexedDB (un peu après l'affichage de l'appli)
-Promise.all([spinGet().catch(()=>null),scanGet().catch(()=>null)]).then(([rec,sc])=>{
+// window.__scanRecP : la voiture scannée (ou null), attendue par l'intro pour montrer ta vraie voiture dès le lancement
+window.__scanRecP=Promise.all([spinGet().catch(()=>null),scanGet().catch(()=>null)]).then(([rec,sc])=>{
   if(rec&&Array.isArray(rec.frames)&&rec.frames.length>=8)spinSet(rec);
   if(sc&&sc.disp&&sc.atlas&&sc.views)scanSet(sc);
-}).catch(()=>{}).then(()=>{SPIN.loaded=true;spinUI();setStageView(viewPref,false);});
+}).catch(()=>{}).then(()=>{SPIN.loaded=true;spinUI();setStageView(viewPref,false);return SCAN.on&&SCAN.rec?SCAN.rec:null;});
 
 /* ---------- Raccourcis de l'accueil ---------- */
 $('#qaFuel').addEventListener('click',()=>{go('drive');setTimeout(()=>fuelOpen(null),reduce?0:450);});
@@ -3592,7 +3593,7 @@ function endSplash(){
 }
 function introInfo(final){
   const v=view(),set=(k,t)=>{const el=document.querySelector(`[data-intro="${k}"]`);if(el&&el.textContent!==t)el.textContent=t;};
-  const name=profile.car&&profile.car!==DEFAULT.car?profile.car:BODY_NAMES[bodyType()];
+  const name=profile.car&&profile.car!==DEFAULT.car?profile.car:SCAN.on&&SCAN.rec?'Ta voiture':BODY_NAMES[bodyType()];
   set('car',`${name} · ${profile.fuel}`);
   set('link',live.connected?'Boîtier connecté':'Mode démo');
   set('range',ok(v._n.range)?`${fmt(v._n.range)} km`:'—');
@@ -3615,7 +3616,9 @@ window.__introStart=function(gl){
   setTimeout(endSplash,5600);
   return true;
 };
-setTimeout(()=>window.__introStart(false),2600);
+// Sans 3D au bout de 2,6 s : intro sans 3D. Plus de patience si l'intro prépare ta voiture scannée (window.__introWait).
+const introT0=Date.now();
+setTimeout(function introFallback(){if(introStarted||splashDone)return;if(window.__introWait&&Date.now()-introT0<12000){setTimeout(introFallback,250);return;}window.__introStart(false);},2600);
 $('#skipBtn').addEventListener('click',endSplash);
 
 fillForm();paintUI();update();go('home',true);
@@ -3905,6 +3908,21 @@ function lightScene(scene,renderer){
 }
 function fitDist(cam,w,h){const tv=Math.tan(THREE.MathUtils.degToRad(cam.fov/2)),th=tv*cam.aspect;return Math.max((w/2)/th,(h/2)/tv);}
 
+/* ---------- Voiture scannée partagée (v0.17) : préparée une seule fois, pour l'intro puis pour l'appli ---------- */
+const SCANX={key:'',p:null,obj:null};
+let scanMods=null,introRelease=Promise.resolve();   // l'intro rend la voiture à l'appli quand elle a fini (un objet 3D n'a qu'une scène)
+function scanBuild(rec){
+  const k='scan:'+rec.date;
+  if(SCANX.key===k&&SCANX.p)return SCANX.p;
+  if(!scanMods)scanMods=Promise.all([import('three/addons/objects/MarchingCubes.js'),import('./scan3d.js')]);
+  SCANX.key=k;SCANX.obj=null;
+  const p=SCANX.p=scanMods.then(([mc,sc])=>sc.buildScanObject(THREE,mc,rec)).then(o=>{if(SCANX.p===p)SCANX.obj=o;return o;});
+  p.catch(()=>{scanMods=null;if(SCANX.p===p){SCANX.key='';SCANX.p=null;}});
+  return p;
+}
+function scanForget(o){if(o&&SCANX.obj===o){SCANX.key='';SCANX.p=null;SCANX.obj=null;}}
+const waitMs=ms=>new Promise(r=>setTimeout(()=>r(null),ms));
+
 /* ================== DÉMARRAGE ================== */
 // Fond de l'intro (opaque, nécessaire au halo) : dégradé Studio violet-bleu ou nuit selon l'ambiance
 function introBg(){
@@ -3923,26 +3941,45 @@ function prepareIntro(){
   const canvas=document.getElementById('introCanvas');
   let renderer;try{renderer=makeRenderer(canvas);}catch(e){return null;}
   renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));
+  // Ta vraie voiture si tu l'as scannée : lecture sur l'appareil puis préparation (2,4 s au plus), sinon le dessin Vigie
+  window.__introWait=true;
+  const recP=window.__scanRecP?Promise.race([window.__scanRecP,waitMs(800)]):Promise.resolve(null);
+  return recP.then(rec=>rec?Promise.race([scanBuild(rec),waitMs(1600)]):null).catch(()=>null)
+    .then(so=>{window.__introWait=false;if(window.__splashDone){renderer.dispose();return null;}return introScene(renderer,so);});
+}
+function introScene(renderer,so){
   const scene=new THREE.Scene();const LS=lightScene(scene,renderer);
   scene.background=introBg();
   const keyMax=LS.key.intensity,softMax=LS.soft.intensity,sideMax=LS.side.intensity,rimMax=LS.rim.intensity;
   LS.key.intensity=0;LS.soft.intensity=0;LS.side.intensity=0;LS.rim.intensity=0;
   const cam=new THREE.PerspectiveCamera(32,1,.1,100);
-  useBody(S().body);
-  const car=buildCar({paint:S().paint,ev:S().ev});scene.add(car.group);
-  const glows=addGlows(car,0);
-  const gr=addGround(scene,car,{reveal:0});
-  const X=tex(),kz=HALF/.90;
-  // Allumage des phares : traînées horizontales et flaques de lumière au sol devant la voiture
-  const glow=(color)=>new THREE.SpriteMaterial({map:X.glow,color,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0});
-  const streaks=[],pools=[];
-  for(const sd of [-1,1]){
-    const st=new THREE.Sprite(glow(0xdbe4ff));st.position.set(T.F+.18,T.noseY-.06,sd*.56*kz);car.group.add(st);streaks.push(st);
-    const pm=new THREE.MeshBasicMaterial({map:X.glow,color:0xd4d2ff,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0});
-    const pool=new THREE.Mesh(new THREE.PlaneGeometry(3.6,1.15),pm);pool.rotation.x=-Math.PI/2;pool.position.set(T.F+2.0,.007,sd*.55*kz);car.group.add(pool);pools.push(pool);
+  const X=tex(),RM=!!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
+  let car,fx,glows=[],streaks=[],pools=[],wide=null,ring=null,U=null,release=null;
+  if(so){
+    // Ta voiture scannée, révélée par un faisceau de scanner qui monte du sol au toit
+    useDims(so.dims);car=so;scene.add(so.group);fx={group:new THREE.Group()};scene.add(fx.group); // ombre et anneaux à part : l'objet reste intact pour l'appli
+    U=so.material.uniforms;U.uReveal.value=RM?99:-.1;U.uScan.value=RM?0:1;
+    ring=new THREE.Mesh(new THREE.RingGeometry(.965,1,160),new THREE.MeshBasicMaterial({color:0x9fe9ff,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));
+    ring.rotation.x=-Math.PI/2;ring.scale.set((T.F-T.R)/2+.35,HALF+.35,1);scene.add(ring);
+    introRelease=new Promise(r=>{release=()=>{U.uReveal.value=99;U.uScan.value=0;scene.remove(so.group);r();};});
+    window.VigieState.introCar='scan';
+  }else{
+    useBody(S().body);
+    car=buildCar({paint:S().paint,ev:S().ev});scene.add(car.group);fx=car;
+    glows=addGlows(car,0);
+    const kz=HALF/.90;
+    // Allumage des phares : traînées horizontales et flaques de lumière au sol devant la voiture
+    const glow=(color)=>new THREE.SpriteMaterial({map:X.glow,color,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0});
+    for(const sd of [-1,1]){
+      const st=new THREE.Sprite(glow(0xdbe4ff));st.position.set(T.F+.18,T.noseY-.06,sd*.56*kz);car.group.add(st);streaks.push(st);
+      const pm=new THREE.MeshBasicMaterial({map:X.glow,color:0xd4d2ff,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0});
+      const pool=new THREE.Mesh(new THREE.PlaneGeometry(3.6,1.15),pm);pool.rotation.x=-Math.PI/2;pool.position.set(T.F+2.0,.007,sd*.55*kz);car.group.add(pool);pools.push(pool);
+    }
+    wide=new THREE.Sprite(glow(0xc6d2ff));wide.position.set(T.F+.22,T.noseY-.06,0);car.group.add(wide);
+    window.VigieState.introCar='dessin';
   }
-  const wide=new THREE.Sprite(glow(0xc6d2ff));wide.position.set(T.F+.22,T.noseY-.06,0);car.group.add(wide);
-  // Halo lumineux (phares, sol) avec post-traitement
+  const gr=addGround(scene,fx,{reveal:0});
+  // Halo lumineux (phares, scanner, sol) avec post-traitement
   let composer=null,bloom=null;
   try{composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,cam));bloom=new UnrealBloomPass(new THREE.Vector2(256,256),0,.28,1.0);composer.addPass(bloom);composer.addPass(new OutputPass());}catch(e){composer=null;}
   const draw=()=>{if(composer)composer.render();else renderer.render(scene,cam);};
@@ -3950,19 +3987,20 @@ function prepareIntro(){
   function size(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);if(composer)composer.setSize(w,h);cam.aspect=w/h;cam.updateProjectionMatrix();}
   size();addEventListener('resize',size);
   cam.position.set(9,1,0);cam.lookAt(0,.55,0);
-  try{renderer.compile(scene,cam);draw();}catch(e){}
+  try{renderer.compile(scene,cam);draw();}catch(e){}   // textures et matériaux envoyés à la carte graphique avant le départ
   let t0=0;
+  const free=()=>{if(release){release();release=null;}};
   return function start(){
-    if(!window.__introStart||!window.__introStart(true)){removeEventListener('resize',size);renderer.dispose();return;}
+    if(!window.__introStart||!window.__introStart(true)){removeEventListener('resize',size);free();renderer.dispose();return;}
     t0=performance.now();requestAnimationFrame(frame);
   };
   function frame(){
     if(window.__splashDone){
       removeEventListener('resize',size);
-      const end=performance.now()+900;(function tail(){if(performance.now()<end){draw();requestAnimationFrame(tail);}else{renderer.dispose();try{renderer.forceContextLoss();}catch(e){}}})();
+      const end=performance.now()+900;(function tail(){if(performance.now()<end){draw();requestAnimationFrame(tail);}else{free();renderer.dispose();try{renderer.forceContextLoss();}catch(e){}}})();
       return;
     }
-    const ms=performance.now()-t0,t=ms/1000;
+    const ms=performance.now()-t0,t=ms/1000,k=ease(cl((ms-3500)/1900));
     // 1. La voiture sort de l'ombre
     const Lk=ease(cl((ms-150)/1300));
     LS.key.intensity=keyMax*Lk;LS.soft.intensity=softMax*Lk;LS.side.intensity=sideMax*Lk;LS.rim.intensity=rimMax*Lk;
@@ -3970,22 +4008,32 @@ function prepareIntro(){
     gr.floorMat.uniforms.uReveal.value=easeOut(cl((ms-200)/1500))*9;
     gr.floorMat.uniforms.uBoost.value=(1-cl((ms-900)/900))*.8;
     gr.ringMat.opacity=cl((ms-500)/700)*.45;gr.arcMat.opacity=cl((ms-700)/700)*.28;gr.arc.rotation.z=t*.3;
-    // 2. Les phares s'allument (lumière « HDR » : seuls eux produisent le halo)
-    const L=cl((ms-1500)/160),burst=Math.max(0,1-(ms-1500)/900);
-    car.mats.head.color.setRGB(lerp(.05,1.7,L),lerp(.08,1.8,L),lerp(.1,2.0,L));
-    car.mats.tail.color.setRGB(lerp(.08,2.2,L),lerp(.02,.3,L),lerp(.02,.3,L));
-    glows.forEach(g=>{g.material.opacity=L*.42;g.scale.setScalar(g.userData.base*(.8+burst*.6*L));});
-    const sk=easeOut(cl((ms-1500)/550)),fl=L*(.5+.5*burst);
-    streaks.forEach(st=>{st.material.opacity=fl*.7;st.scale.set(lerp(.4,6.5,sk),.06,1);});
-    wide.material.opacity=fl*.45;wide.scale.set(lerp(.6,13,sk),.045,1);
-    pools.forEach(pl=>pl.material.opacity=L*.5);
-    if(bloom)bloom.strength=.14+L*(.16+burst*.3);
+    if(so){
+      // 2. Le scanner monte du sol au toit (0,55 → 2,35 s, quand le voile noir du départ s'est éclairci) : la voiture apparaît
+      //    sous la ligne lumineuse, puis prend ses vraies couleurs
+      if(!RM){
+        const sb=cl((ms-550)/1800),y=lerp(-.05,T.roof+.08,ease(sb)),g=1-cl((ms-2250)/600);
+        U.uReveal.value=y;U.uScan.value=g;
+        ring.position.y=y;ring.material.opacity=Math.sin(Math.PI*cl(sb*1.06))*.85*g;
+        if(bloom)bloom.strength=.12+.34*g*(1-.6*sb*sb);
+      }else if(bloom)bloom.strength=.12;
+    }else{
+      // 2. Les phares s'allument (lumière « HDR » : seuls eux produisent le halo)
+      const L=cl((ms-1500)/160),burst=Math.max(0,1-(ms-1500)/900);
+      car.mats.head.color.setRGB(lerp(.05,1.7,L),lerp(.08,1.8,L),lerp(.1,2.0,L));
+      car.mats.tail.color.setRGB(lerp(.08,2.2,L),lerp(.02,.3,L),lerp(.02,.3,L));
+      glows.forEach(g=>{g.material.opacity=L*.42;g.scale.setScalar(g.userData.base*(.8+burst*.6*L));});
+      const sk=easeOut(cl((ms-1500)/550)),fl=L*(.5+.5*burst);
+      streaks.forEach(st=>{st.material.opacity=fl*.7;st.scale.set(lerp(.4,6.5,sk),.06,1);});
+      wide.material.opacity=fl*.45;wide.scale.set(lerp(.6,13,sk),.045,1);
+      pools.forEach(pl=>pl.material.opacity=L*.5);
+      if(bloom)bloom.strength=.12+L*(.10+burst*.34)*(1-.45*k);   // halo plus doux en trois quarts (capot moins éblouissant)
+    }
     gr.under.material.opacity=.3*Lk;
     // 3. Caméra : face avant qui avance doucement, puis trois quarts avant à l'arrivée du « Bonjour »
     const portrait=cam.aspect<1;
     const dF=fitDist(cam,HALF*2+(portrait?2.3:5.2),T.roof+(portrait?2.6:3.1));
     const d3=fitDist(cam,portrait?Math.max(4.8,len+1.2):Math.max(7.6,len+3.0),portrait?Math.max(3.4,T.roof+1.8):Math.max(4.2,T.roof+2.6));
-    const k=ease(cl((ms-3500)/1900));
     const ang=lerp(Math.PI/2,Math.PI/2+.85,k),elev=lerp(.05,.2,k);
     const d=lerp(dF*lerp(1.16,1,ease(cl(ms/3300))),d3,k);
     const ty=.55;
@@ -4006,19 +4054,18 @@ function runApp(){
   let car=null,mirror=null,mirrorPaint=[],glows=[],gr=null,curKey='',paint=S().paint;
   const disposeTree=o=>o.traverse(x=>{if(x.geometry)x.geometry.dispose();if(x.material)x.material.dispose();});
   // Voiture scannée (v0.15) : préparée en arrière-plan (maillage + peinture), le dessin Vigie reste affiché d'ici là
-  const SC={pending:'',failed:'',ready:null};
-  let scanMods=null;
+  const SC={pending:'',failed:'',ready:null},born=performance.now();
   const scanWanted=s=>s.scanOn&&s.scanRec&&s.scanRec.date?'scan:'+s.scanRec.date:'';
   const scanTexDispose=o=>{const u=o&&o.material&&o.material.uniforms;if(u){if(u.uTex.value)u.uTex.value.dispose();if(u.uMask.value)u.uMask.value.dispose();}};
   function scanPrep(k,rec){
     if(SC.pending===k||SC.failed===k||(SC.ready&&SC.ready.key===k))return;
     SC.pending=k;window.VigieState.scan3d={state:'prépa'};
-    if(!scanMods)scanMods=Promise.all([import('three/addons/objects/MarchingCubes.js'),import('./scan3d.js')]);
-    scanMods.then(([mc,sc])=>sc.buildScanObject(THREE,mc,rec)).then(o=>{
-      if(SC.pending!==k){disposeTree(o.group);scanTexDispose(o);return;}
-      if(SC.ready){disposeTree(SC.ready.obj.group);scanTexDispose(SC.ready.obj);}
+    // Même objet que l'intro (préparé une seule fois) ; on attend que l'intro l'ait rendu
+    Promise.all([scanBuild(rec),Promise.race([introRelease,waitMs(4000)])]).then(([o])=>{ // 4 s au plus, si l'intro s'était arrêtée en route
+      if(SC.pending!==k){if(!(car&&car.scan===o)){disposeTree(o.group);scanTexDispose(o);scanForget(o);}return;}
+      if(SC.ready&&SC.ready.obj!==o){disposeTree(SC.ready.obj.group);scanTexDispose(SC.ready.obj);scanForget(SC.ready.obj);}
       SC.ready={key:k,obj:o};SC.pending='';
-    },e=>{scanMods=null;if(SC.pending===k){SC.pending='';SC.failed=k;}window.VigieState.scan3d={state:'échec',err:String(e&&e.message||e).slice(0,200)};});
+    },e=>{if(SC.pending===k){SC.pending='';SC.failed=k;}window.VigieState.scan3d={state:'échec',err:String(e&&e.message||e).slice(0,200)};});
   }
   function keyOf(s){
     const w=scanWanted(s);
@@ -4046,7 +4093,7 @@ function runApp(){
   }
   function mount(){
     const s=S();curKey=keyOf(s);paint=s.paint;
-    if(car){table.remove(car.group);table.remove(mirror);disposeTree(car.group);disposeTree(mirror);if(car.scan)scanTexDispose(car.scan);}
+    if(car){table.remove(car.group);table.remove(mirror);disposeTree(car.group);disposeTree(mirror);if(car.scan){scanTexDispose(car.scan);scanForget(car.scan);}}
     if(curKey.startsWith('scan:')&&SC.ready&&SC.ready.key===curKey){
       const o=SC.ready.obj;SC.ready=null;useDims(o.dims);
       // Pas de peinture ni de feux dessinés : la couleur vient des images. Matériaux factices pour le reste de la scène.
@@ -4105,7 +4152,11 @@ function runApp(){
   attach(S().tab||'home');cam.position.set(0,4,10);cam.lookAt(0,.5,0);
   // Matériaux compilés sans bloquer (en parallèle quand le navigateur le permet) ; le dessin SVG reste affiché d'ici là
   let compiled=false;const done=()=>{compiled=true;};
-  try{if(renderer.compileAsync)renderer.compileAsync(scene,cam).then(done,done);else{renderer.compile(scene,cam);done();}}catch(e){done();}
+  // Ta voiture scannée déjà prête (intro) : son matériau est compilé en même temps que la scène, pour qu'elle s'affiche sans attente
+  const warm=SCANX.obj&&scanWanted(S())?new THREE.Mesh(new THREE.BufferGeometry(),SCANX.obj.material):null;
+  if(warm){warm.frustumCulled=false;scene.add(warm);}
+  const done2=()=>{if(warm)scene.remove(warm);done();};
+  try{if(renderer.compileAsync)renderer.compileAsync(scene,cam).then(done2,done2);else{renderer.compile(scene,cam);done2();}}catch(e){done2();}
   let last=performance.now();
   function frame(now){
     requestAnimationFrame(frame);
@@ -4117,6 +4168,8 @@ function runApp(){
     st.rendered=true;
     if(vw==='home'&&s.photoView)return;
     if(keyOf(s)!==curKey)mount();
+    // Au lancement, si ta voiture scannée arrive, on l'attend (2,5 s au plus) plutôt que de montrer le dessin un instant
+    if(!st.shown&&scanWanted(s)&&!car.scanKey&&now-born<2500)return;
     applyTheme(s);
     if(s.paint&&s.paint!==paint){paint=s.paint;car.mats.paint.color.set(paint);mirrorPaint.forEach(m=>m.color.set(paint));}
     const P=PRESET[vw]||PRESET.home;
@@ -4156,8 +4209,8 @@ function runApp(){
   requestAnimationFrame(frame);
 }
 
-const startIntro=prepareIntro();
-if(startIntro)startIntro();
+const introP=prepareIntro();
+if(introP)introP.then(start=>{if(start)start();}).catch(e=>{window.__introWait=false;try{console.warn('Intro 3D indisponible :',e&&e.message||e);}catch(_){}});
 // La scène de l'appli se prépare après le lancement : sur un téléphone lent, elle ne bloque plus l'animation
 (function appLater(){
   const ob=document.getElementById('onboard');

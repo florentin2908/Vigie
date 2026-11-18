@@ -32,6 +32,7 @@ Ce que fait le script :
 - (v0.14) vue 360° réelle : fabrique 10 photos puis une vidéo ffmpeg testsrc de 30 s en .mp4 H.264, les donne au Garage,
   vérifie l'extraction (36 images JPEG de 960 px dans IndexedDB, durée), l'affichage 360° de l'accueil, la rotation au glisser,
   la rotation lente quand on ne touche pas, et la conservation après rechargement ;
+- (v0.17) intro : sans scan, le dessin Vigie (phares) ; après le scan et un rechargement, l'intro montre la voiture scannée ;
 - (v0.15) scan 3D : la vidéo testsrc (sans voiture) doit donner la vue 360° avec une explication calme (pas une erreur) ;
   puis une vidéo de synthèse d'une voiture filmée en tournant (outils/video-de-test.py, 150 images) doit donner la voiture
   en 3D : proportions proches de la vraie, gardée dans IndexedDB (magasin « scan »), affichée sur l'accueil, dans Santé
@@ -569,6 +570,12 @@ async def persistence(pg):
             try: await pg.wait_for_function(SCAN_STATE + " === 'affichée'", timeout=40000)
             except Exception: errors.append(f'contrôle : la voiture scannée ne s\'affiche plus après rechargement ({await pg.evaluate(SCAN_STATE)})')
             await snap(pg, 'tel_scan3d_apres_rechargement')
+            # v0.17 : l'intro montre la voiture scannée (révélée par le scanner) au lieu du dessin
+            ic = await pg.evaluate("(window.VigieState || {}).introCar")
+            scan_3d['intro_apres_rechargement'] = ic
+            try: scan_3d['lancement_avec_scan'] = await pg.evaluate(INTRO_STATS)
+            except Exception: pass
+            if ic != 'scan': errors.append(f"contrôle : l'intro ne montre pas la voiture scannée après rechargement ({ic})")
     except Exception as e:
         errors.append('contrôle : vue 360° pas rechargée : ' + str(e).splitlines()[0][:120])
 
@@ -591,7 +598,7 @@ async def main():
             errors.append('le démarrage ne se termine pas (body.ready absent après 45 s)')
         await pg.wait_for_timeout(2500)
         start_s = round(time.time() - t0, 1)
-        try: intro.update(await pg.evaluate(INTRO_STATS))
+        try: intro.update(await pg.evaluate(INTRO_STATS)); intro['voiture'] = await pg.evaluate("(window.VigieState || {}).introCar")
         except Exception: pass
         await onboarding(pg)
         await honesty(pg)

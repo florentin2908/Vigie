@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fabrique une vidéo de test réaliste pour le scan 3D de Vigie, avec sa vérité terrain.
 
-Usage : python3 outils/video-de-test.py <dossier_de_sortie> [--deps /tmp/vigie-deps] [--images 300]
+Usage : python3 outils/video-de-test.py <dossier_de_sortie> [--deps /tmp/vigie-deps] [--images 300] [--depart 0.03]
 
 Le tour est filmé par une caméra virtuelle (champ de 66° en paysage, comme un téléphone) qui marche autour
 d'une voiture Vigie rouge, sur un parking, à hauteur des phares, en suivant un rectangle arrondi à environ
@@ -16,6 +16,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('out')
 ap.add_argument('--deps', default='/tmp/vigie-deps')
 ap.add_argument('--images', type=int, default=300)
+ap.add_argument('--depart', type=float, default=.03, help='point de départ du tour (fraction du tour, 0,03 = devant à gauche ; 0,53 = de l\'autre côté)')
 args = ap.parse_args()
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.abspath(args.out); os.makedirs(OUT, exist_ok=True)
@@ -24,7 +25,7 @@ NM = os.path.join(os.path.abspath(args.deps), 'node_modules')
 # Le code 3D de Vigie (silhouettes, éclairage) est repris tel quel depuis index.html, sans le lancement de l'appli
 page = open(os.path.join(ROOT, 'index.html'), encoding='utf-8').read()
 mod = re.search(r'<script type="module">(.*?)</script>', page, re.S).group(1)
-mod = mod[:mod.index('const startIntro=prepareIntro();')]
+mod = mod[:mod.index('const introP=prepareIntro();')]
 
 SCENE = r"""
 const W=640,H=360,N=%(n)d,HFOV=66;
@@ -73,7 +74,7 @@ function pathAt(u){ // u ∈ [0,1) le long du chemin, sens trigonométrique vu d
 window.__frames=[];window.__truth={n:N,hfov:HFOV,w:W,h:H,dims:{L:size.x,W:size.z,H:size.y},center:[ctr.x,ctr.y,ctr.z],frames:[]};
 const tgt=new THREE.Vector3(ctr.x,.65,ctr.z);
 window.__render=function(i){
-  const u=(i/N+.03)%%1,[x,z]=pathAt(u),y=.85+Math.sin(i*.9)*.02;
+  const u=(i/N+%(depart)f)%%1,[x,z]=pathAt(u),y=.85+Math.sin(i*.9)*.02;
   cam.position.set(x,y,z);
   const j1=Math.sin(i*.37)*.035,j2=Math.sin(i*.23+1)*.02; // tremblements de visée (environ 2° et 1°)
   cam.lookAt(tgt);cam.rotateY(j1);cam.rotateX(j2);
@@ -96,7 +97,7 @@ async def main():
     html = ('<!doctype html><html><body style="margin:0;background:#000"><script type="importmap">'
             '{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}'
             '</script><script>window.VigieState={studio:false,accent:"#5AC8FA",floor:"#5AC8FA",tint:"#ffffff"};</script>'
-            '<script type="module">' + mod + (SCENE % {'n': args.images}) + '</script></body></html>')
+            '<script type="module">' + mod + (SCENE % {'n': args.images, 'depart': args.depart}) + '</script></body></html>')
     open(os.path.join(tmp, 'index.html'), 'w', encoding='utf-8').write(html)
     httpd = socketserver.TCPServer(('127.0.0.1', 0), functools.partial(Q, directory=tmp))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

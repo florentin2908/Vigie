@@ -589,8 +589,12 @@ void main(){vO=aOrig;vN=aOrigN;vY=position.y;vec4 wp=modelMatrix*vec4(position,1
 // Couleur vue sur les images (les vues les plus en face pèsent le plus) ; ce qu'aucune image ne voit (toit, capot, dessous)
 // prend la couleur de la peinture estimée. Par-dessus : vernis (reflets d'un studio : boîte à lumière, horizon, lumière principale).
 const FS = (n) => `uniform sampler2D uTex;uniform sampler2D uMask;uniform vec3 uC[${n}];uniform vec3 uR[${n}];uniform vec3 uU[${n}];uniform vec3 uF[${n}];
-uniform vec2 uFN;uniform float uOpacity;uniform vec3 uPaint;uniform vec3 uRoof;uniform float uH;uniform float uGloss;varying vec3 vO;varying vec3 vN;varying vec3 vWP;varying vec3 vWN;varying float vY;
+uniform vec2 uFN;uniform float uOpacity;uniform vec3 uPaint;uniform vec3 uRoof;uniform float uH;uniform float uGloss;uniform float uReveal;uniform float uScan;varying vec3 vO;varying vec3 vN;varying vec3 vWP;varying vec3 vWN;varying float vY;
 void main(){
+  if(vY>uReveal)discard;
+  if(uScan>0.001&&!gl_FrontFacing){gl_FragColor=vec4(vec3(0.05,0.22,0.36)+vec3(0.30,0.65,0.85)*0.45*uScan,uOpacity); // coupe du scanner : tranche lumineuse
+    #include <colorspace_fragment>
+    return;}
   vec3 n=normalize(vN);vec3 acc=vec3(0.0);float ws=0.0;float wmax=0.0;
   for(int i=0;i<${n};i++){
     vec3 q=vO-uC[i];float zc=dot(q,uF[i]);if(zc<0.2)continue;
@@ -613,6 +617,7 @@ void main(){
   vec3 prior=mix(uPaint,uRoof,smoothstep(0.70*uH,0.86*uH,vY));vec3 painted=prior*(0.30+0.70*(0.5+0.5*nl));
   vec3 base=mix(painted,seen*(0.92+0.16*max(nl,0.0)),conf);
   vec3 c=base*(1.0-fres*uGloss*0.5)+(env*fres+vec3(sp*0.55))*uGloss;
+  float band=exp(-abs(uReveal-vY)*28.0)*uScan;c=mix(c,c*0.55+vec3(0.10,0.22,0.30),uScan*0.35)+vec3(0.45,0.92,1.0)*band*2.4; // ligne du scanner
   gl_FragColor=vec4(c,uOpacity);
   #include <colorspace_fragment>
 }`;
@@ -625,21 +630,31 @@ export async function buildScanObject(THREE, MC, rec) {
   const { P, I } = marching(D.field, nx, ny, nz, 127.5, MC.edgeTable, MC.triTable);
   smoothMesh(P, I, 10);
   const nV = P.length / 3, { alpha, cx, cz } = rec.align, ca = Math.cos(alpha), sa = Math.sin(alpha);
+  // Sens de la voiture : le toit (le haut de l'habitacle) est presque toujours plus près de l'arrière que de l'avant
+  // (capot devant, coffre ou hayon derrière). L'avant est placé du côté des x positifs, comme les dessins de Vigie.
+  const F = D.field; let jTop = 0;
+  for (let q = 0; q < F.length; q++) if (F[q] >= 128) { const j = ((q / nx) | 0) % ny; if (j > jTop) jTop = j; }
+  let sumA = 0, nA = 0; const jMin = Math.round(jTop * .82);
+  for (let k = 0; k < nz; k++) for (let j = jMin; j < ny; j++) for (let i = 0; i < nx; i++) if (F[(k * ny + j) * nx + i] >= 128) { sumA += a0 + (i + .5) * cell; nA++; }
+  const roofA = nA ? sumA / nA - ac : 0, flip = roofA > .02 ? -1 : 1;
   const pos = new Float32Array(nV * 3), orig = new Float32Array(nV * 3);
   for (let v = 0; v < nV; v++) {
     const a = a0 + (P[v * 3] + .5) * cell, y = (P[v * 3 + 1] + .5) * cell, b = b0 + (P[v * 3 + 2] + .5) * cell;
-    pos[v * 3] = a - ac; pos[v * 3 + 1] = y; pos[v * 3 + 2] = b - bc;                    // affichage : centrée, axe long sur x
+    pos[v * 3] = (a - ac) * flip; pos[v * 3 + 1] = y; pos[v * 3 + 2] = (b - bc) * flip;   // affichage : centrée, axe long sur x, avant vers +x
     orig[v * 3] = cx + a * ca - b * sa; orig[v * 3 + 1] = y; orig[v * 3 + 2] = cz + a * sa + b * ca;   // repère des caméras du scan
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(I, 1));
   g.computeVertexNormals();
-  const nr = g.getAttribute('normal').array; let out = 0;
+  let nr = g.getAttribute('normal').array, out = 0;
   for (let v = 0; v < nV; v += 7) out += nr[v * 3] * pos[v * 3] + nr[v * 3 + 1] * (pos[v * 3 + 1] - .6) + nr[v * 3 + 2] * pos[v * 3 + 2];
-  if (out < 0) for (let k = 0; k < nr.length; k++) nr[k] = -nr[k];                          // normales vers l'extérieur
+  if (out < 0) { // triangles tournés vers l'intérieur : on les retourne (faces avant = dehors, utile à la coupe du scanner)
+    for (let t = 0; t < I.length; t += 3) { const x = I[t + 1]; I[t + 1] = I[t + 2]; I[t + 2] = x; }
+    g.computeVertexNormals(); nr.set(g.getAttribute('normal').array);
+  }
   smoothNormals(nr, I, 3);
   const on = new Float32Array(nV * 3);
-  for (let v = 0; v < nV; v++) { const na = nr[v * 3], nb = nr[v * 3 + 2]; on[v * 3] = na * ca - nb * sa; on[v * 3 + 1] = nr[v * 3 + 1]; on[v * 3 + 2] = na * sa + nb * ca; }
+  for (let v = 0; v < nV; v++) { const na = nr[v * 3] * flip, nb = nr[v * 3 + 2] * flip; on[v * 3] = na * ca - nb * sa; on[v * 3 + 1] = nr[v * 3 + 1]; on[v * 3 + 2] = na * sa + nb * ca; }
   g.setAttribute('aOrig', new THREE.BufferAttribute(orig, 3)); g.setAttribute('aOrigN', new THREE.BufferAttribute(on, 3));
   g.computeBoundingSphere();
   // Image classique (pas ImageBitmap, qui ignore flipY sur certains navigateurs)
@@ -653,10 +668,10 @@ export async function buildScanObject(THREE, MC, rec) {
   const pc = rec.paint || rec.base || [.6, .6, .6], rc = rec.roof || pc, srgb = c => new THREE.Color().setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace);
   const material = new THREE.ShaderMaterial({
     uniforms: { uTex: { value: tex }, uMask: { value: mtex }, uC: { value: uC }, uR: { value: uR }, uU: { value: uU }, uF: { value: uF },
-      uFN: { value: new THREE.Vector2(...rec.fN) }, uOpacity: { value: 1 }, uGloss: { value: .6 },
+      uFN: { value: new THREE.Vector2(...rec.fN) }, uOpacity: { value: 1 }, uGloss: { value: .6 }, uReveal: { value: 99 }, uScan: { value: 0 },
       uPaint: { value: srgb(pc) }, uRoof: { value: srgb(rc) }, uH: { value: rec.dims.H } },
     vertexShader: VS, fragmentShader: FS(NV), side: THREE.DoubleSide, toneMapped: false, transparent: false
   });
   const mesh = new THREE.Mesh(g, material), group = new THREE.Group(); group.add(mesh);
-  return { group, material, dims: rec.dims, triangles: I.length / 3 };
+  return { group, material, dims: rec.dims, triangles: I.length / 3, front: { flipped: flip < 0, roofCm: Math.round(roofA * 100) } };
 }

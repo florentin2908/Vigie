@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.17",
+      "date": "18 nov. 2026",
+      "items": [
+        "L'intro montre ta vraie voiture scannée : un faisceau de scanner la fait apparaître du sol jusqu'au toit",
+        "Ta voiture scannée regarde dans le bon sens (l'avant est reconnu) et arrive sur l'accueil sans repasser par le dessin Vigie",
+        "Intro sans scan : halo plus doux sur le capot quand la voiture se tourne"
+      ]
+    },
+    {
       "version": "0.16",
       "date": "18 nov. 2026",
       "items": [
