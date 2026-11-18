@@ -1,0 +1,130 @@
+{
+  "versions": [
+    {
+      "version": "0.14",
+      "date": "18 nov. 2026",
+      "items": [
+        "Vue 360° de ta vraie voiture : filme-en le tour (ou choisis 8 à 36 photos), puis fais-la tourner du doigt sur l'accueil",
+        "La vidéo et les images restent sur ton téléphone, rien n'est envoyé",
+        "Vigie a son propre site, installable sur ton téléphone et ton autoradio Android"
+      ]
+    },
+    {
+      "version": "0.13",
+      "date": "18 nov. 2026",
+      "items": [
+        "Nouveau mode autoradio : l'écran de la voiture en 3D, avec la voiture au centre, de gros chiffres et de gros boutons (GPS, Waze, Spotify, téléphone, caméra de recul, stations, bilan)",
+        "Vigie s'installe comme une appli sur ton téléphone ou ton autoradio Android, et s'ouvre même sans réseau",
+        "Carnet d'entretien modifiable : la prochaine vidange et le prochain contrôle technique se calculent tout seuls",
+        "Scénarios de démo dans Garage pour montrer Vigie : pneu crevé, batterie faible, voyant moteur, réserve",
+        "La voiture 3D s'allège toute seule sur les appareils lents"
+      ]
+    },
+    {
+      "version": "0.12",
+      "date": "18 nov. 2026",
+      "items": [
+        "Nouvelle ambiance Studio : fond violet-bleu et voiture éclairée comme en studio",
+        "Nouveau lancement : ta voiture de face, les phares qui s'allument, puis « Bonjour » et la vue de trois quarts",
+        "Choisis ton ambiance dans Garage : Studio ou selon la voiture"
+      ]
+    },
+    {
+      "version": "0.11",
+      "date": "18 nov. 2026",
+      "items": [
+        "Lancement plus fluide : l'animation démarre tout de suite, la voiture de l'accueil se prépare juste après",
+        "Sur téléphone, la pastille Démo se cache quand tu descends et revient quand tu remontes",
+        "Sans boîtier, la semaine et les derniers trajets sont marqués « Exemple » pour ne jamais te tromper"
+      ]
+    },
+    {
+      "version": "0.10",
+      "date": "17 nov. 2026",
+      "items": [
+        "Nouvelle organisation : Accueil, Santé, Énergie, Mécano et Garage, avec la barre d'onglets en bas sur téléphone",
+        "L'accueil dit en 3 secondes si tout va bien, ce qu'il faut faire, et propose des raccourcis",
+        "Textes plus grands et plus lisibles",
+        "Ambiance selon ta voiture et lancement 3D plus réaliste"
+      ]
+    },
+    {
+      "version": "0.9",
+      "date": "17 nov. 2026",
+      "items": [
+        "La voiture 3D prend la forme de ton type de voiture : citadine, SUV, break, monospace, utilitaire…",
+        "Vigie reconnaît le type d'après le modèle que tu écris, ou tu le choisis dans Carrosserie",
+        "Ajoute la vraie photo de ta voiture et choisis 3D ou Photo sur l'accueil"
+      ]
+    },
+    {
+      "version": "0.8",
+      "date": "17 nov. 2026",
+      "items": [
+        "Vigie gère maintenant les voitures électriques : batterie en kWh, autonomie, puissance",
+        "Carnet de recharges, séparé du carnet de pleins",
+        "Mécano et le bilan savent si ta voiture est électrique"
+      ]
+    },
+    {
+      "version": "0.7",
+      "date": "17 nov. 2026",
+      "items": [
+        "Carnet de pleins : note tes passages à la pompe, même sans boîtier",
+        "Ta vraie consommation, ton coût au kilomètre et ta dépense du mois",
+        "L'autonomie se calcule avec ta vraie consommation",
+        "Affichage corrigé sur les petits téléphones"
+      ]
+    },
+    {
+      "version": "0.6",
+      "date": "17 nov. 2026",
+      "items": [
+        "Premier lancement guidé : ton prénom, ta voiture et le boîtier OBD en 3 étapes",
+        "Titres et derniers trajets plus lisibles sur téléphone",
+        "La couleur choisie pour ta voiture reste bien enregistrée"
+      ]
+    },
+    {
+      "version": "0.5",
+      "date": "17 nov. 2026",
+      "items": [
+        "Nouveautés de Vigie visibles dans l'appli",
+        "Un agent améliore désormais l'appli automatiquement, plusieurs fois par jour"
+      ]
+    },
+    {
+      "version": "0.4",
+      "date": "17 nov. 2026",
+      "items": [
+        "Mécano, l'assistant IA qui analyse ta voiture et répond à tes questions",
+        "Réservoir animé et débit de carburant en direct",
+        "Carte des stations avec les prix en direct (quand l'appli est en ligne)",
+        "Historique des trajets avec score éco et carnet d'entretien"
+      ]
+    },
+    {
+      "version": "0.3",
+      "date": "17 nov. 2026",
+      "items": [
+        "Interface alignée et animée",
+        "Nouvelle voiture 3D plus réaliste, avec reflet et particules"
+      ]
+    },
+    {
+      "version": "0.2",
+      "date": "17 nov. 2026",
+      "items": [
+        "Rubriques à gauche et voiture 3D au centre",
+        "Démarrage animé en 3D"
+      ]
+    },
+    {
+      "version": "0.1",
+      "date": "17 nov. 2026",
+      "items": [
+        "Première version : accueil, état, conduite, réglages, mode démo"
+      ]
+    }
+  ]
+}
