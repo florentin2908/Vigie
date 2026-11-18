@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.16",
+      "date": "18 nov. 2026",
+      "items": [
+        "Ta voiture scannée est bien plus fidèle : forme 2,5 fois plus fine, symétrique et lissée",
+        "Vitres et toit sombres comme en vrai, roues nettes, couleur de peinture retrouvée sur le capot et le toit",
+        "Reflets de studio sur la carrosserie scannée"
+      ]
+    },
+    {
       "version": "0.15",
       "date": "18 nov. 2026",
       "items": [

@@ -390,7 +390,7 @@ async def spin360(pg):
 SCAN_IDB_JS = """() => new Promise(r => {
   const q = indexedDB.open('vigie');
   q.onsuccess = () => { try { const g = q.result.transaction('scan').objectStore('scan').get('current');
-    g.onsuccess = () => { const v = g.result; q.result.close(); r(v ? {n: v.n, champ: v.field && v.field.length, vues: v.views && v.views.length, atlas: v.atlas && v.atlas.type, atlas_ko: v.atlas && Math.round(v.atlas.size / 1024), masques: v.maskAtlas && v.maskAtlas.type, dims: v.dims} : null); };
+    g.onsuccess = () => { const v = g.result; q.result.close(); r(v ? {grille: v.disp && [v.disp.nx, v.disp.ny, v.disp.nz], champ: v.disp && v.disp.field && v.disp.field.length, peinture: v.paint, vues: v.views && v.views.length, atlas: v.atlas && v.atlas.type, atlas_ko: v.atlas && Math.round(v.atlas.size / 1024), masques: v.maskAtlas && v.maskAtlas.type, dims: v.dims} : null); };
     g.onerror = () => r(null); } catch (e) { r(null); } };
   q.onerror = () => r(null);
 })"""
@@ -425,7 +425,7 @@ async def scan3d(pg):
         if abs(lh / tlh - 1) > .15 or abs(wh / twh - 1) > .2:
             errors.append(f"contrôle : la voiture scannée n'a pas les bonnes proportions (L/H {lh:.2f} au lieu de {tlh:.2f}, l/H {wh:.2f} au lieu de {twh:.2f})")
         if q.get('carFrames', 0) < 60: errors.append(f"contrôle : voiture reconnue sur {q.get('carFrames')} images sur 72 seulement")
-        if not db or db['champ'] != 96 ** 3 or db['vues'] != 36 * 12 or db['atlas'] != 'image/jpeg' or db['masques'] != 'image/png' or db['atlas_ko'] < 100:
+        if not db or not db['champ'] or db['champ'] < 300000 or db['vues'] != 36 * 12 or db['atlas'] != 'image/jpeg' or db['masques'] != 'image/png' or db['atlas_ko'] < 100:
             errors.append(f'contrôle : le scan 3D n\'est pas gardé comme prévu dans IndexedDB : {db}')
         if st['scanMs'] and st['scanMs'] > 120000: errors.append(f"contrôle : scan 3D en {st['scanMs'] / 1000:.0f} s (objectif : moins de 2 min en rendu logiciel)")
         await pg.evaluate("document.querySelector('#spinCard').scrollIntoView({block: 'center'})"); await pg.wait_for_timeout(800)

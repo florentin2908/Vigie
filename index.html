@@ -3441,6 +3441,7 @@ function scanProg(stage,k){const s=SCAN_STEPS[stage];if(!s)return;spinProg(s[1]+
 const SCAN_WHY={
   courte:'la vidéo dure moins de 6 secondes',
   modele:'le détourage de la voiture n’a pas pu se charger (il faut le réseau la première fois)',
+  modelePage:'cette page ne permet pas de charger le détourage de la voiture : ouvre Vigie depuis son site (florentin2908.github.io/Vigie) pour le scan 3D',
   voiture:'Vigie n’a pas reconnu ta voiture sur assez d’images',
   forme:'la forme trouvée est trop petite ou en morceaux',
   autre:'le calcul n’a pas abouti sur cet appareil'
@@ -3461,7 +3462,8 @@ async function spinMake(kind,files){
       }catch(e){
         const c=e&&e.message;
         if(c==='lecture')throw e;
-        SCAN.note=`Le modèle 3D n’a pas pu être fait : ${SCAN_WHY[c]||SCAN_WHY.autre}. La vue 360° est prête. Pour la 3D, refilme un tour complet à environ 3 m, la voiture entière au milieu de l’écran.`;
+        const why=c==='modele'&&!document.querySelector('link[rel="manifest"]')?SCAN_WHY.modelePage:(SCAN_WHY[c]||SCAN_WHY.autre);
+        SCAN.note=`Le modèle 3D n’a pas pu être fait : ${why}. La vue 360° est prête. Pour la 3D, refilme un tour complet à environ 3 m, la voiture entière au milieu de l’écran.`;
         if(e&&e.spinFrames&&e.spinFrames.length>=8)r={frames:e.spinFrames,w:e.spinSize[0],h:e.spinSize[1]};
         else{spinProg(0,'Lecture de la vidéo…');r=await framesFromVideo(files[0]);}
       }
@@ -3501,7 +3503,7 @@ spinUI();
 // Au démarrage : la vue 360° et le scan 3D viennent d'IndexedDB (un peu après l'affichage de l'appli)
 Promise.all([spinGet().catch(()=>null),scanGet().catch(()=>null)]).then(([rec,sc])=>{
   if(rec&&Array.isArray(rec.frames)&&rec.frames.length>=8)spinSet(rec);
-  if(sc&&sc.field&&sc.atlas&&sc.views)scanSet(sc);
+  if(sc&&sc.disp&&sc.atlas&&sc.views)scanSet(sc);
 }).catch(()=>{}).then(()=>{SPIN.loaded=true;spinUI();setStageView(viewPref,false);});
 
 /* ---------- Raccourcis de l'accueil ---------- */
@@ -4011,7 +4013,7 @@ function runApp(){
     if(SC.pending===k||SC.failed===k||(SC.ready&&SC.ready.key===k))return;
     SC.pending=k;window.VigieState.scan3d={state:'prépa'};
     if(!scanMods)scanMods=Promise.all([import('three/addons/objects/MarchingCubes.js'),import('./scan3d.js')]);
-    scanMods.then(([mc,sc])=>sc.buildScanObject(THREE,mc.MarchingCubes,rec)).then(o=>{
+    scanMods.then(([mc,sc])=>sc.buildScanObject(THREE,mc,rec)).then(o=>{
       if(SC.pending!==k){disposeTree(o.group);scanTexDispose(o);return;}
       if(SC.ready){disposeTree(SC.ready.obj.group);scanTexDispose(SC.ready.obj);}
       SC.ready={key:k,obj:o};SC.pending='';

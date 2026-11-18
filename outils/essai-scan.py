@@ -30,7 +30,7 @@ HTML = """<!doctype html><html><body style="margin:0;background:#222">
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <script type="module">
 import * as THREE from 'three';
-import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
+import * as MC from 'three/addons/objects/MarchingCubes.js';
 import { scanVideo, buildScanObject } from './scan3d.js';
 window.__run = async () => {
   const t0 = performance.now(), times = {}; let last = t0, stage = '';
@@ -43,7 +43,7 @@ window.__run = async () => {
         const d = g.getImageData(0, 0, SW, SH).data, m = new Uint8Array(SW * SH); for (let i = 0; i < SW * SH; i++) m[i] = d[i * 4] > 100 ? 1 : 0; out.push(m); } return out; } : null, seekOnly: !!window.__SEEK, truePoses: window.__TRUE && !window.__ONLYMASK ? (times) => times.map(t => { const f = window.__TRUE.frames[Math.min(window.__TRUE.frames.length - 1, Math.round(t * window.__TRUE.fps))]; return { theta: f.az * Math.PI / 180, d: f.dist, yaw: window.__AIM ? f.yaw : undefined, pitch: window.__AIM ? f.pitch : undefined, th: window.__AIM ? f.tgtY : undefined }; }) : null, progress: (s) => { if (s !== stage) { const now = performance.now(); if (stage) times[stage] = Math.round(now - last); last = now; stage = s; } } });
   } catch (e) { return { error: String(e && e.message || e), quality: e && e.quality }; }
   times[stage] = Math.round(performance.now() - last); times.total = Math.round(performance.now() - t0); const durations = times;
-  const obj = await buildScanObject(THREE, MarchingCubes, rec);
+  const tb = performance.now(); const obj = await buildScanObject(THREE, MC, rec); durations.affichage = Math.round(performance.now() - tb);
   // 4 vues de la voiture reconstruite
   const W = 480, H = 270, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true }); r.setSize(W, H, false); r.setClearColor(0x30343c, 1);

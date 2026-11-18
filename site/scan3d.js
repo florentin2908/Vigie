@@ -127,6 +127,9 @@ function dilate(m, W, H, r) {
   }
   return a;
 }
+function erode1(m, W, H) { const b = new Uint8Array(W * H);
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const i = y * W + x; b[i] = m[i] && m[i - 1] && m[i + 1] && m[i - W] && m[i + W] ? 1 : 0; }
+  return b; }
 function maskStats(m, W, H) {
   let n = 0, x0 = W, x1 = -1, y0 = H, y1 = -1;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (m[y * W + x]) { n++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
@@ -221,14 +224,6 @@ function largestComponent(occ, n) {
   const out = new Uint8Array(occ.length); for (let i = 0; i < occ.length; i++) if (lab[i] === best) out[i] = 1;
   return out;
 }
-function blur3(f, n) { // flou 3 × 3 × 3 séparable
-  const a = f, b = new Float32Array(f.length);
-  for (let ax = 0; ax < 3; ax++) { const s = ax === 0 ? 1 : ax === 1 ? n : n * n;
-    for (let i = 0; i < a.length; i++) { const c = ax === 0 ? i % n : ax === 1 ? ((i / n) | 0) % n : (i / (n * n)) | 0;
-      b[i] = (a[i] * 2 + (c > 0 ? a[i - s] : 0) + (c < n - 1 ? a[i + s] : 0)) / 4; }
-    a.set(b); }
-  return a;
-}
 function shapeOf(occ, n, box) { // axe long (analyse en composantes principales), dimensions
   const { R, Y } = box; let c = 0, mx = 0, mz = 0, ymax = 0;
   for (let i = 0; i < occ.length; i++) if (occ[i]) { const x = i % n, z = (i / (n * n)) | 0; mx += x; mz += z; c++; }
@@ -264,6 +259,129 @@ function refineCams(occ, n, box, base, masks, SW, SH, fpx, ok, refineDist) {
       const q = { ...p, theta: p.theta - dt * D, yaw: p.yaw + dt * D, d: p.d * ds, pitch: p.pitch + dp * D }, sc = score(makeCam(q.theta, q.d, q.yaw, q.pitch, q.th), masks[j]) - (Math.abs(dt) / 25 + Math.abs(ds - 1) * .6 + Math.abs(dp) / 40);
       if (sc > bs) { bs = sc; best = q; } }
     return best; });
+}
+
+/* ---------- 4 bis. Forme fine dans le repère de la voiture (v0.15.1) ---------- */
+// Grille alignée sur la voiture : i le long (axe a), j en hauteur, k en largeur (axe b), cubes de CELL mètres.
+// Indice (k * ny + j) * nx + i, comme la grille de départ. Seule la peau de la forme grossière est retestée.
+const CELL = .025;
+function morph3(occ, n, grow) { // dilatation (grow) ou érosion d'un cube, voisinage 3 × 3 × 3
+  let a = occ;
+  for (let ax = 0; ax < 3; ax++) { const s = ax === 0 ? 1 : ax === 1 ? n : n * n, b = new Uint8Array(a.length);
+    for (let i = 0; i < a.length; i++) { const c = ax === 0 ? i % n : ax === 1 ? ((i / n) | 0) % n : (i / (n * n)) | 0;
+      const l = c > 0 ? a[i - s] : 0, r = c < n - 1 ? a[i + s] : 0; b[i] = grow ? (a[i] | l | r) : (a[i] & l & r); }
+    a = b; }
+  return a;
+}
+function carveAligned(cams, masks, SW, SH, fpx, S, sh) {
+  const { alpha, cx, cz, L, W, H } = sh, ca = Math.cos(alpha), sa = Math.sin(alpha), m = .15;
+  const nx = Math.ceil((L + 2 * m) / CELL), ny = Math.ceil((H + m) / CELL), nz = Math.ceil((W + 2 * m) / CELL);
+  const a0 = -nx * CELL / 2, b0 = -nz * CELL / 2;
+  const n = GRID, { R, Y } = S.box, near = morph3(S.occ, n, true), sure = morph3(morph3(S.occ, n, false), n, false);
+  const occ = new Uint8Array(nx * ny * nz), nv = cams.length, maxOut = Math.max(2, Math.round(nv * .07));
+  const order = []; for (let s = 0; s < 8; s++) for (let i = s; i < nv; i += 8) order.push(i);
+  for (let k = 0; k < nz; k++) { const b = b0 + (k + .5) * CELL;
+    for (let j = 0; j < ny; j++) { const wy = (j + .5) * CELL; if (wy < .03) continue; const gy = Math.floor(wy / Y * n); if (gy >= n) continue;
+      for (let i = 0; i < nx; i++) {
+        const a = a0 + (i + .5) * CELL, wx = cx + a * ca - b * sa, wz = cz + a * sa + b * ca;
+        const gx = Math.floor((wx / R + 1) / 2 * n), gz = Math.floor((wz / R + 1) / 2 * n);
+        if (gx < 0 || gz < 0 || gx >= n || gz >= n) continue;
+        const g = (gz * n + gy) * n + gx; if (!near[g]) continue;
+        if (sure[g]) { occ[(k * ny + j) * nx + i] = 1; continue; }   // bien à l'intérieur de la forme grossière
+        let out = 0, seen = 0;
+        for (const v of order) { const c = cams[v], qx = wx - c.C[0], qy = wy - c.C[1], qz = wz - c.C[2];
+          const zc = qx * c.f[0] + qy * c.f[1] + qz * c.f[2]; if (zc < .3) continue;
+          const u = SW / 2 + fpx * (qx * c.r[0] + qy * c.r[1] + qz * c.r[2]) / zc, w = SH / 2 - fpx * (qx * c.u[0] + qy * c.u[1] + qz * c.u[2]) / zc;
+          if (u < 0 || w < 0 || u >= SW || w >= SH) continue;
+          seen++; if (!masks[v][(w | 0) * SW + (u | 0)]) { if (++out > maxOut) break; } }
+        if (out <= maxOut && seen >= nv * .35) occ[(k * ny + j) * nx + i] = 1;
+      } } }
+  return { occ, nx, ny, nz, a0, b0 };
+}
+function largestComp3(occ, nx, ny, nz) {
+  const lab = new Int32Array(occ.length).fill(-1), st = [], NXY = nx * ny; let best = -1, bestN = 0, id = 0;
+  for (let i = 0; i < occ.length; i++) { if (!occ[i] || lab[i] >= 0) continue; let c = 0; lab[i] = id; st.push(i);
+    while (st.length) { const k = st.pop(); c++; const x = k % nx, y = ((k / nx) | 0) % ny, z = (k / NXY) | 0;
+      if (x > 0 && occ[k - 1] && lab[k - 1] < 0) { lab[k - 1] = id; st.push(k - 1); }
+      if (x < nx - 1 && occ[k + 1] && lab[k + 1] < 0) { lab[k + 1] = id; st.push(k + 1); }
+      if (y > 0 && occ[k - nx] && lab[k - nx] < 0) { lab[k - nx] = id; st.push(k - nx); }
+      if (y < ny - 1 && occ[k + nx] && lab[k + nx] < 0) { lab[k + nx] = id; st.push(k + nx); }
+      if (z > 0 && occ[k - NXY] && lab[k - NXY] < 0) { lab[k - NXY] = id; st.push(k - NXY); }
+      if (z < nz - 1 && occ[k + NXY] && lab[k + NXY] < 0) { lab[k + NXY] = id; st.push(k + NXY); } }
+    if (c > bestN) { bestN = c; best = id; } id++; }
+  const out = new Uint8Array(occ.length); for (let i = 0; i < occ.length; i++) if (lab[i] === best) out[i] = 1;
+  return out;
+}
+function blur3a(f, nx, ny, nz) { // flou [1 2 1] / 4 sur les 3 axes
+  const b = new Float32Array(f.length), dims = [nx, ny, nz], strides = [1, nx, nx * ny];
+  for (let ax = 0; ax < 3; ax++) { const s = strides[ax], n = dims[ax];
+    for (let i = 0; i < f.length; i++) { const c = ax === 0 ? i % nx : ax === 1 ? ((i / nx) | 0) % ny : (i / (nx * ny)) | 0;
+      b[i] = (f[i] * 2 + (c > 0 ? f[i - s] : 0) + (c < n - 1 ? f[i + s] : 0)) / 4; }
+    f.set(b); }
+  return f;
+}
+// Vu d'en bas (téléphone plus bas que le toit), le haut de la forme sculptée monte en « tente » au-dessus du vrai toit.
+// Pour chaque tranche de la voiture, le milieu est ramené à la hauteur atteinte aux deux tiers de sa largeur.
+function flattenRoof(occ, nx, ny, nz) {
+  const top = new Int16Array(nx * nz).fill(-1);
+  for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) for (let j = ny - 1; j >= 0; j--) if (occ[(k * ny + j) * nx + i]) { top[k * nx + i] = j; break; }
+  let cut = 0;
+  for (let i = 0; i < nx; i++) {
+    let k0 = -1, k1 = -1; for (let k = 0; k < nz; k++) if (top[k * nx + i] >= 0) { if (k0 < 0) k0 = k; k1 = k; }
+    if (k0 < 0 || k1 - k0 < 12) continue;
+    const kA = Math.round(k0 + .34 * (k1 - k0)), kB = Math.round(k0 + .66 * (k1 - k0)), tA = top[kA * nx + i], tB = top[kB * nx + i];
+    if (tA < 0 || tB < 0) continue;
+    const cap = Math.round((tA + tB) / 2) + 1;
+    for (let k = kA; k <= kB; k++) for (let j = cap + 1; j < ny; j++) { const q = (k * ny + j) * nx + i; if (occ[q]) { occ[q] = 0; cut++; } }
+  }
+  return cut;
+}
+// Une voiture est symétrique gauche-droite : on cherche le plan (en largeur) qui superpose le mieux la forme et son
+// reflet, puis on fait la moyenne des deux. Les bosses d'un seul côté (erreurs de détourage) sont divisées par deux.
+function symmetrize(f, nx, ny, nz) {
+  const overlap = m2 => { let s = 0; for (let k = 0; k < nz; k++) { const k2 = m2 - k; if (k2 < 0 || k2 >= nz) continue;
+    for (let j = 0; j < ny; j += 2) { const o1 = (k * ny + j) * nx, o2 = (k2 * ny + j) * nx; for (let i = 0; i < nx; i += 2) s += Math.min(f[o1 + i], f[o2 + i]); } } return s; };
+  let bm = nz - 1, bs = -1;
+  for (let m2 = nz - 1 - 12; m2 <= nz - 1 + 12; m2++) { const s = overlap(m2); if (s > bs) { bs = s; bm = m2; } }
+  const g = new Float32Array(f.length);
+  for (let k = 0; k < nz; k++) { const k2 = bm - k, in2 = k2 >= 0 && k2 < nz;
+    for (let j = 0; j < ny; j++) { const o1 = (k * ny + j) * nx, o2 = (k2 * ny + j) * nx; for (let i = 0; i < nx; i++) g[o1 + i] = .5 * (f[o1 + i] + (in2 ? f[o2 + i] : 0)); } }
+  return { g, mid: bm / 2 };
+}
+// Couleur dominante d'un ensemble de pixels : la teinte la plus fréquente (ou le gris le plus fréquent pour une voiture
+// blanche, grise ou noire), puis la moyenne des pixels de cette teinte entre le 40e et le 85e centile de luminosité
+// (ni les ombres, ni les reflets du ciel).
+function dominant(px) {
+  if (!px.length) return null;
+  const key = (r, g, b) => { const mx = Math.max(r, g, b), mn = Math.min(r, g, b), sat = mx ? (mx - mn) / mx : 0;
+    if (sat < .22 || mx < 40) return 200 + Math.min(7, mx >> 5);
+    let h = mx === r ? (g - b) / (mx - mn) : mx === g ? 2 + (b - r) / (mx - mn) : 4 + (r - g) / (mx - mn); h = (h + 6) % 6;
+    return Math.min(23, Math.floor(h * 4)) * 3 + Math.min(2, Math.floor((sat - .22) / .26)); };
+  const cnt = new Uint32Array(208), keys = new Uint8Array(px.length / 3);
+  for (let i = 0; i < keys.length; i++) { keys[i] = key(px[i * 3], px[i * 3 + 1], px[i * 3 + 2]); cnt[keys[i]]++; }
+  let best = 0; for (let k = 1; k < 208; k++) if (cnt[k] > cnt[best]) best = k;
+  const sel = []; for (let i = 0; i < keys.length; i++) if (keys[i] === best) sel.push(i);
+  sel.sort((x, y) => (px[x * 3] * .3 + px[x * 3 + 1] * .59 + px[x * 3 + 2] * .11) - (px[y * 3] * .3 + px[y * 3 + 1] * .59 + px[y * 3 + 2] * .11));
+  let r = 0, g = 0, b = 0, n = 0; for (let k = Math.floor(sel.length * .4); k < Math.max(Math.floor(sel.length * .4) + 1, Math.floor(sel.length * .85)); k++) { const i = sel[k]; r += px[i * 3]; g += px[i * 3 + 1]; b += px[i * 3 + 2]; n++; }
+  return n ? [r / n / 255, g / n / 255, b / n / 255] : null;
+}
+// Couleur de la peinture : portières, entre les vitres et les roues (loin des bords de la silhouette)
+function paintColor(masks, smalls, idxs, SW, SH) {
+  const px = [];
+  for (const i of idxs) { const m = masks[i], st = maskStats(m, SW, SH); if (!st.n) continue; const d = smalls[i].data;
+    for (let y = Math.max(2, Math.round(st.y0 + st.h * .4)); y <= Math.min(SH - 3, Math.round(st.y0 + st.h * .75)); y += 2)
+      for (let x = Math.max(2, st.x0); x <= Math.min(SW - 3, st.x1); x += 2) { const p = y * SW + x;
+        if (m[p] && m[p - 2] && m[p + 2] && m[p - 2 * SW] && m[p + 2 * SW]) px.push(d[p * 4], d[p * 4 + 1], d[p * 4 + 2]); } }
+  return dominant(px);
+}
+// Couleur du haut de la voiture (toit) : juste sous le bord haut de la silhouette, sur le milieu de sa longueur
+function roofColor(masks, smalls, idxs, SW, SH) {
+  const px = [];
+  for (const i of idxs) { const m = masks[i], st = maskStats(m, SW, SH); if (!st.n || st.cutT) continue; const d = smalls[i].data;
+    for (let x = Math.round(st.x0 + st.w * .3); x <= Math.round(st.x1 - st.w * .3); x += 2) {
+      let y = 0; while (y < SH && !m[y * SW + x]) y++;
+      for (let yy = y + 2; yy <= Math.min(SH - 1, y + 5); yy++) { const p = yy * SW + x; if (m[p]) px.push(d[p * 4], d[p * 4 + 1], d[p * 4 + 2]); } } }
+  return dominant(px);
 }
 
 /* ---------- Tout le scan ---------- */
@@ -357,17 +475,29 @@ async function scanFrames(F, opts, progress) {
   vis.forEach((i, j) => { theta[i] = texPoses[j].theta; });
   const finalPoses = texPoses;
   q.passes = passes.map(p => [p.L, p.W, p.H].map(v => Math.round(v * 100) / 100));
+  // Forme fine (cubes de 2,5 cm) dans le repère de la voiture, avec les mêmes caméras que la forme grossière, puis symétrie
+  progress('carve', .93); await tick();
+  const fine = carveAligned(poses.map(p => makeCam(p.theta, p.d, p.yaw, p.pitch, p.th)), dm, SW, SH, fpx, S, S.shape);
+  const { nx, ny, nz } = fine, fo = largestComp3(fine.occ, nx, ny, nz);
+  q.fine = { roofCut: flattenRoof(fo, nx, ny, nz) };
+  const ff = new Float32Array(fo.length); let fv = 0; for (let i = 0; i < ff.length; i++) { ff[i] = fo[i]; fv += fo[i]; }
+  if (fv < 5000) { const e = new Error('forme'); e.quality = q; throw e; }
+  blur3a(ff, nx, ny, nz); blur3a(ff, nx, ny, nz); blur3a(ff, nx, ny, nz);
+  const sym = symmetrize(ff, nx, ny, nz), f8 = new Uint8Array(ff.length);
+  let i0 = nx, i1 = -1, j1 = -1, k0 = nz, k1 = -1;
+  for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const v = sym.g[(k * ny + j) * nx + i]; f8[(k * ny + j) * nx + i] = Math.round(clamp(v, 0, 1) * 255);
+    if (v >= .5) { if (i < i0) i0 = i; if (i > i1) i1 = i; if (j > j1) j1 = j; if (k < k0) k0 = k; if (k > k1) k1 = k; } }
+  const disp = { nx, ny, nz, cell: CELL, a0: fine.a0, b0: fine.b0, field: f8,
+    ac: fine.a0 + ((i0 + i1) / 2 + .5) * CELL, bc: fine.b0 + (sym.mid + .5) * CELL };
+  const dims = { L: (i1 - i0 + 1) * CELL, W: (k1 - k0 + 1) * CELL, H: (j1 + 1) * CELL };
+  Object.assign(q.fine, { voxels: fv, grid: [nx, ny, nz], symPlaneCm: Math.round((disp.bc - (fine.b0 + nz * CELL / 2)) * 100) });
   progress('carve', 1);
-  // Champ lissé pour le maillage
-  const field = new Float32Array(S.occ.length); for (let i = 0; i < field.length; i++) field[i] = S.occ[i];
-  blur3(field, GRID); blur3(field, GRID);
-  const f8 = new Uint8Array(field.length); for (let i = 0; i < field.length; i++) f8[i] = Math.round(clamp(field[i], 0, 1) * 255);
   // 36 vues régulières autour de la voiture pour la peinture et la vue 360°
   progress('paint', 0);
   const ang = vis.map(i => theta[i]), picks = [];
   for (let k = 0; k < N_TEX; k++) { const t = ang[0] + Math.sign(total) * k * 2 * Math.PI / N_TEX; let bi = 0, bd = 1e9;
     vis.forEach((i, j) => { const d = Math.abs(Math.atan2(Math.sin(ang[j] - t), Math.cos(ang[j] - t))); if (d < bd) { bd = d; bi = j; } }); picks.push(bi); }
-  const CW = 512, CH = Math.round(CW * SH / SW), MW = 256, MH = Math.round(MW * SH / SW), cols = 6, rows = 6;
+  const CW = 640, CH = Math.round(CW * SH / SW), MW = SW, MH = SH, cols = 6, rows = 6;
   const atlas = document.createElement('canvas'); atlas.width = CW * cols; atlas.height = CH * rows; const ga = atlas.getContext('2d');
   const matl = document.createElement('canvas'); matl.width = MW * cols; matl.height = MH * rows; const gm = matl.getContext('2d');
   const mc = document.createElement('canvas'); mc.width = SW; mc.height = SH; const gmc = mc.getContext('2d'), mid = gmc.createImageData(SW, SH);
@@ -375,77 +505,138 @@ async function scanFrames(F, opts, progress) {
   for (let k = 0; k < N_TEX; k++) {
     const j = picks[k], i = vis[j], cam = camsTex[j], col = k % cols, row = (k / cols) | 0;
     const bmp = await createImageBitmap(F.bigs[i]); ga.drawImage(bmp, col * CW, row * CH, CW, CH); if (bmp.close) bmp.close();
-    const m = dm[j]; for (let p = 0; p < SW * SH; p++) { const v = m[p] ? 255 : 0; mid.data[p * 4] = mid.data[p * 4 + 1] = mid.data[p * 4 + 2] = v; mid.data[p * 4 + 3] = 255;
+    const m = erode1(masks[i], SW, SH); for (let p = 0; p < SW * SH; p++) { const v = m[p] ? 255 : 0; mid.data[p * 4] = mid.data[p * 4 + 1] = mid.data[p * 4 + 2] = v; mid.data[p * 4 + 3] = 255;
       if (masks[i][p] && (p & 7) === 0) { const s = F.smalls[i].data; cr += s[p * 4]; cg += s[p * 4 + 1]; cb += s[p * 4 + 2]; cn++; } }
     gmc.putImageData(mid, 0, 0); gm.drawImage(mc, col * MW, row * MH, MW, MH);
     views.set([...cam.C, ...cam.r, ...cam.u, ...cam.f], k * 12);
     progress('paint', (k + 1) / N_TEX); if (k % 6 === 5) await tick();
   }
   const [atlasBlob, maskBlob] = await Promise.all([toJpeg(atlas, .86), new Promise(r => matl.toBlob(r, 'image/png'))]);
-  const sh2 = S.shape;
+  const sh2 = S.shape, base = cn ? [cr / cn / 255, cg / cn / 255, cb / cn / 255] : [.6, .6, .6];
   q.loopDeg = 360; q.views = vis.length;
   return {
-    v: 1, date: new Date().toISOString(), n: GRID, field: f8, box: S.box,
-    align: { alpha: sh2.alpha, cx: sh2.cx, cz: sh2.cz }, dims: { L: sh2.L, W: sh2.W, H: sh2.H },
+    v: 2, date: new Date().toISOString(), disp,
+    align: { alpha: sh2.alpha, cx: sh2.cx, cz: sh2.cz }, dims,
     views, fN: [fpx / SW, fpx / SH], atlas: atlasBlob, maskAtlas: maskBlob, grid: [cols, rows],
-    base: cn ? [cr / cn / 255, cg / cn / 255, cb / cn / 255] : [.6, .6, .6], quality: q,
+    base, paint: paintColor(masks, F.smalls, vis.filter((_, j) => j % 2 === 0), SW, SH) || base,
+    roof: roofColor(masks, F.smalls, vis.filter((_, j) => j % 2 === 0), SW, SH), quality: q,
     spinFrames: picks.map(j => F.bigs[vis[j]]), spinSize: [F.BW, F.BH],
     debug: opts.debug ? { poses: finalPoses, heading, ctimes: F.times, top: (() => { const n = GRID, t = new Array(n * n).fill(0); for (let i = 0; i < S.occ.length; i++) if (S.occ[i]) { const x = i % n, z = (i / (n * n)) | 0; t[z * n + x] = 1; } return t; })(), side: (() => { const n = GRID, t = new Array(n * n).fill(0); for (let i = 0; i < S.occ.length; i++) if (S.occ[i]) { const x = i % n, y = ((i / n) | 0) % n; t[(n - 1 - y) * n + x] = 1; } return t; })(), times: F.times, theta, dist, stats, ok, steps, dxs, peaks, vis, masks: [0, 9, 18, 27].map(i => Array.from(masks[i])), SW, SH } : undefined
   };
 }
 
-/* ---------- Affichage : maillage + peinture par projection des images ---------- */
-const VS = `attribute vec3 aOrig;attribute vec3 aOrigN;varying vec3 vO;varying vec3 vN;
-void main(){vO=aOrig;vN=aOrigN;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
+/* ---------- Affichage : maillage lisse + peinture par projection des images + lumière de studio ---------- */
+// Marching cubes avec sommets partagés (un sommet par arête de la grille), sur une grille nx × ny × nz.
+// Mêmes conventions que l'addon MarchingCubes de three.js (tables edgeTable / triTable) : densité, intérieur ≥ iso.
+function marching(F, nx, ny, nz, iso, edgeTable, triTable) {
+  const NXY = nx * ny, N = NXY * nz, E = [new Int32Array(N).fill(-1), new Int32Array(N).fill(-1), new Int32Array(N).fill(-1)];
+  let P = new Float32Array(65536 * 3), np = 0, I = new Uint32Array(65536 * 6), ni = 0;
+  const ev = new Int32Array(12);
+  const vert = (ax, q, x, y, z, f0, f1) => { const e = E[ax]; let v = e[q]; if (v >= 0) return v;
+    if (np * 3 + 3 > P.length) { const b = new Float32Array(P.length * 2); b.set(P); P = b; }
+    const t = (iso - f0) / (f1 - f0); P[np * 3] = ax === 0 ? x + t : x; P[np * 3 + 1] = ax === 1 ? y + t : y; P[np * 3 + 2] = ax === 2 ? z + t : z;
+    e[q] = np; return np++; };
+  for (let z = 0; z < nz - 1; z++) for (let y = 0; y < ny - 1; y++) for (let x = 0; x < nx - 1; x++) {
+    const q = x + y * nx + z * NXY;
+    const f0 = F[q], f1 = F[q + 1], f2 = F[q + nx], f3 = F[q + 1 + nx], f4 = F[q + NXY], f5 = F[q + 1 + NXY], f6 = F[q + nx + NXY], f7 = F[q + 1 + nx + NXY];
+    let ci = 0; if (f0 < iso) ci |= 1; if (f1 < iso) ci |= 2; if (f2 < iso) ci |= 8; if (f3 < iso) ci |= 4;
+    if (f4 < iso) ci |= 16; if (f5 < iso) ci |= 32; if (f6 < iso) ci |= 128; if (f7 < iso) ci |= 64;
+    const bits = edgeTable[ci]; if (!bits) continue;
+    if (bits & 1) ev[0] = vert(0, q, x, y, z, f0, f1);
+    if (bits & 2) ev[1] = vert(1, q + 1, x + 1, y, z, f1, f3);
+    if (bits & 4) ev[2] = vert(0, q + nx, x, y + 1, z, f2, f3);
+    if (bits & 8) ev[3] = vert(1, q, x, y, z, f0, f2);
+    if (bits & 16) ev[4] = vert(0, q + NXY, x, y, z + 1, f4, f5);
+    if (bits & 32) ev[5] = vert(1, q + 1 + NXY, x + 1, y, z + 1, f5, f7);
+    if (bits & 64) ev[6] = vert(0, q + nx + NXY, x, y + 1, z + 1, f6, f7);
+    if (bits & 128) ev[7] = vert(1, q + NXY, x, y, z + 1, f4, f6);
+    if (bits & 256) ev[8] = vert(2, q, x, y, z, f0, f4);
+    if (bits & 512) ev[9] = vert(2, q + 1, x + 1, y, z, f1, f5);
+    if (bits & 1024) ev[10] = vert(2, q + 1 + nx, x + 1, y + 1, z, f3, f7);
+    if (bits & 2048) ev[11] = vert(2, q + nx, x, y + 1, z, f2, f6);
+    const o = ci << 4;
+    for (let i = 0; triTable[o + i] !== -1; i += 3) {
+      if (ni + 3 > I.length) { const b = new Uint32Array(I.length * 2); b.set(I); I = b; }
+      I[ni++] = ev[triTable[o + i]]; I[ni++] = ev[triTable[o + i + 1]]; I[ni++] = ev[triTable[o + i + 2]]; }
+  }
+  return { P: P.slice(0, np * 3), I: I.slice(0, ni) };
+}
+// Lissage de Taubin (lisse sans faire maigrir la forme)
+function smoothMesh(P, I, iters) {
+  const nV = P.length / 3, S = new Float32Array(nV * 3), C = new Float32Array(nV);
+  const add = (u, v, w) => { S[u * 3] += P[v * 3] + P[w * 3]; S[u * 3 + 1] += P[v * 3 + 1] + P[w * 3 + 1]; S[u * 3 + 2] += P[v * 3 + 2] + P[w * 3 + 2]; C[u] += 2; };
+  const pass = lam => { S.fill(0); C.fill(0);
+    for (let t = 0; t < I.length; t += 3) { const a = I[t], b = I[t + 1], c = I[t + 2]; add(a, b, c); add(b, c, a); add(c, a, b); }
+    for (let v = 0; v < nV; v++) if (C[v]) for (let k = 0; k < 3; k++) P[v * 3 + k] += lam * (S[v * 3 + k] / C[v] - P[v * 3 + k]); };
+  for (let i = 0; i < iters; i++) { pass(.5); pass(-.53); }
+}
+
+// Normales moyennées avec les voisines : la lumière glisse sans marches sur les grandes surfaces (toit, capot)
+function smoothNormals(Nr, I, iters) {
+  const nV = Nr.length / 3, S = new Float32Array(nV * 3);
+  for (let it = 0; it < iters; it++) { S.set(Nr);
+    for (let t = 0; t < I.length; t += 3) { const a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3;
+      for (let k = 0; k < 3; k++) { S[a + k] += Nr[b + k] + Nr[c + k]; S[b + k] += Nr[a + k] + Nr[c + k]; S[c + k] += Nr[a + k] + Nr[b + k]; } }
+    for (let v = 0; v < nV; v++) { const x = S[v * 3], y = S[v * 3 + 1], z = S[v * 3 + 2], l = Math.hypot(x, y, z) || 1; Nr[v * 3] = x / l; Nr[v * 3 + 1] = y / l; Nr[v * 3 + 2] = z / l; } }
+}
+const VS = `attribute vec3 aOrig;attribute vec3 aOrigN;varying vec3 vO;varying vec3 vN;varying vec3 vWP;varying vec3 vWN;varying float vY;
+void main(){vO=aOrig;vN=aOrigN;vY=position.y;vec4 wp=modelMatrix*vec4(position,1.0);vWP=wp.xyz;vWN=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*viewMatrix*wp;}`;
+// Couleur vue sur les images (les vues les plus en face pèsent le plus) ; ce qu'aucune image ne voit (toit, capot, dessous)
+// prend la couleur de la peinture estimée. Par-dessus : vernis (reflets d'un studio : boîte à lumière, horizon, lumière principale).
 const FS = (n) => `uniform sampler2D uTex;uniform sampler2D uMask;uniform vec3 uC[${n}];uniform vec3 uR[${n}];uniform vec3 uU[${n}];uniform vec3 uF[${n}];
-uniform vec2 uFN;uniform float uOpacity;uniform vec3 uBase;varying vec3 vO;varying vec3 vN;
+uniform vec2 uFN;uniform float uOpacity;uniform vec3 uPaint;uniform vec3 uRoof;uniform float uH;uniform float uGloss;varying vec3 vO;varying vec3 vN;varying vec3 vWP;varying vec3 vWN;varying float vY;
 void main(){
-  vec3 n=normalize(vN);vec3 acc=vec3(0.0);float ws=0.0;
+  vec3 n=normalize(vN);vec3 acc=vec3(0.0);float ws=0.0;float wmax=0.0;
   for(int i=0;i<${n};i++){
     vec3 q=vO-uC[i];float zc=dot(q,uF[i]);if(zc<0.2)continue;
-    float w=dot(n,normalize(uC[i]-vO));if(w<0.2)continue;
+    float w=dot(n,normalize(uC[i]-vO));if(w<0.12)continue;
     vec2 uv=vec2(0.5+uFN.x*dot(q,uR[i])/zc,0.5+uFN.y*dot(q,uU[i])/zc);
     if(uv.x<0.0||uv.y<0.0||uv.x>1.0||uv.y>1.0)continue;
     float col=mod(float(i),6.0),row=floor(float(i)/6.0);
     vec2 a=vec2((col+uv.x)/6.0,(5.0-row+uv.y)/6.0);
-    float wt=pow((w-0.2)/0.8,4.0)*mix(0.08,1.0,texture2D(uMask,a).r);
-    acc+=texture2D(uTex,a).rgb*wt;ws+=wt;
+    float mk=texture2D(uMask,a).r;vec3 tc=texture2D(uTex,a).rgb;
+    float wt=exp(48.0*(w-1.0))*mix(0.0005,1.0,smoothstep(0.35,0.65,mk))/(0.12+dot(tc,vec3(0.3,0.59,0.11)));
+    acc+=tc*wt;ws+=wt;wmax=max(wmax,w*step(0.5,mk));
   }
-  if(ws<0.0005){
-    vec3 nh=normalize(vec3(n.x,0.0001,n.z));
-    for(int i=0;i<${n};i++){
-      vec3 q=vO-uC[i];float zc=dot(q,uF[i]);if(zc<0.2)continue;
-      vec2 uv=vec2(0.5+uFN.x*dot(q,uR[i])/zc,0.5+uFN.y*dot(q,uU[i])/zc);
-      if(uv.x<0.0||uv.y<0.0||uv.x>1.0||uv.y>1.0)continue;
-      float col=mod(float(i),6.0),row=floor(float(i)/6.0);
-      vec2 a=vec2((col+uv.x)/6.0,(5.0-row+uv.y)/6.0);
-      float wt=texture2D(uMask,a).r*(0.25+0.75*max(dot(nh,normalize(uC[i]-vO)),0.0));
-      acc+=texture2D(uTex,a).rgb*wt;ws+=wt;
-    }
-  }
-  vec3 c=ws>0.0005?acc/ws:uBase*(0.55+0.45*max(n.y,0.0));
+  vec3 seen=ws>1e-30?acc/ws:uPaint;
+  float conf=smoothstep(0.14,0.34,wmax);
+  vec3 N=normalize(vWN);vec3 V=normalize(cameraPosition-vWP);if(dot(N,V)<0.0)N=-N;
+  vec3 L=normalize(vec3(0.55,0.75,0.35));float nl=dot(N,L);
+  vec3 R=reflect(-V,N);float ndv=clamp(dot(N,V),0.0,1.0);float fres=0.04+0.96*pow(1.0-ndv,5.0);
+  vec3 env=mix(vec3(0.015,0.015,0.03),vec3(0.30,0.32,0.42),smoothstep(0.0,0.7,R.y))+vec3(1.5)*smoothstep(0.82,0.95,R.y);
+  float sp=pow(max(dot(R,L),0.0),90.0);
+  vec3 prior=mix(uPaint,uRoof,smoothstep(0.70*uH,0.86*uH,vY));vec3 painted=prior*(0.30+0.70*(0.5+0.5*nl));
+  vec3 base=mix(painted,seen*(0.92+0.16*max(nl,0.0)),conf);
+  vec3 c=base*(1.0-fres*uGloss*0.5)+(env*fres+vec3(sp*0.55))*uGloss;
   gl_FragColor=vec4(c,uOpacity);
   #include <colorspace_fragment>
 }`;
 
-// Construit l'objet 3D à afficher. Renvoie { group, material, dims } : la voiture est posée au sol, axe long sur x.
-export async function buildScanObject(THREE, MarchingCubes, rec) {
-  const n = rec.n, mc = new MarchingCubes(n, new THREE.MeshBasicMaterial(), false, false, 300000);
-  for (let i = 0; i < rec.field.length; i++) mc.field[i] = rec.field[i] / 255;
-  mc.isolation = .5; mc.update();
-  const cnt = mc.count, P = mc.geometry.getAttribute('position').array, Nn = mc.geometry.getAttribute('normal').array;
-  const { R, Y } = rec.box, { alpha, cx, cz } = rec.align, ca = Math.cos(alpha), sa = Math.sin(alpha);
-  const pos = new Float32Array(cnt * 3), orig = new Float32Array(cnt * 3), on = new Float32Array(cnt * 3);
-  for (let v = 0; v < cnt; v++) {
-    const x = (P[v * 3] + 1 / n) * R, y = ((P[v * 3 + 1] + 1) / 2 + .5 / n) * Y, z = (P[v * 3 + 2] + 1 / n) * R; // même repère que la grille sculptée
-    orig[v * 3] = x; orig[v * 3 + 1] = y; orig[v * 3 + 2] = z;
-    let nx = Nn[v * 3] / R, ny = Nn[v * 3 + 1] * 2 / Y, nz = Nn[v * 3 + 2] / R; const l = Math.hypot(nx, ny, nz) || 1; on[v * 3] = nx / l; on[v * 3 + 1] = ny / l; on[v * 3 + 2] = nz / l;
-    const dx = x - cx, dz = z - cz; pos[v * 3] = dx * ca + dz * sa; pos[v * 3 + 1] = y; pos[v * 3 + 2] = -dx * sa + dz * ca;
+// Construit l'objet 3D à afficher. MC = le module MarchingCubes de three.js (pour ses tables).
+// Renvoie { group, material, dims, triangles } : la voiture posée au sol, axe long sur x, centrée.
+export async function buildScanObject(THREE, MC, rec) {
+  const D = rec.disp; if (!D || !D.field) throw new Error('ancien');
+  const { nx, ny, nz, cell, a0, b0, ac, bc } = D;
+  const { P, I } = marching(D.field, nx, ny, nz, 127.5, MC.edgeTable, MC.triTable);
+  smoothMesh(P, I, 10);
+  const nV = P.length / 3, { alpha, cx, cz } = rec.align, ca = Math.cos(alpha), sa = Math.sin(alpha);
+  const pos = new Float32Array(nV * 3), orig = new Float32Array(nV * 3);
+  for (let v = 0; v < nV; v++) {
+    const a = a0 + (P[v * 3] + .5) * cell, y = (P[v * 3 + 1] + .5) * cell, b = b0 + (P[v * 3 + 2] + .5) * cell;
+    pos[v * 3] = a - ac; pos[v * 3 + 1] = y; pos[v * 3 + 2] = b - bc;                    // affichage : centrée, axe long sur x
+    orig[v * 3] = cx + a * ca - b * sa; orig[v * 3 + 1] = y; orig[v * 3 + 2] = cz + a * sa + b * ca;   // repère des caméras du scan
   }
-  mc.geometry.dispose();
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aOrig', new THREE.BufferAttribute(orig, 3)); g.setAttribute('aOrigN', new THREE.BufferAttribute(on, 3));
-  g.computeVertexNormals(); g.computeBoundingSphere();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(I, 1));
+  g.computeVertexNormals();
+  const nr = g.getAttribute('normal').array; let out = 0;
+  for (let v = 0; v < nV; v += 7) out += nr[v * 3] * pos[v * 3] + nr[v * 3 + 1] * (pos[v * 3 + 1] - .6) + nr[v * 3 + 2] * pos[v * 3 + 2];
+  if (out < 0) for (let k = 0; k < nr.length; k++) nr[k] = -nr[k];                          // normales vers l'extérieur
+  smoothNormals(nr, I, 3);
+  const on = new Float32Array(nV * 3);
+  for (let v = 0; v < nV; v++) { const na = nr[v * 3], nb = nr[v * 3 + 2]; on[v * 3] = na * ca - nb * sa; on[v * 3 + 1] = nr[v * 3 + 1]; on[v * 3 + 2] = na * sa + nb * ca; }
+  g.setAttribute('aOrig', new THREE.BufferAttribute(orig, 3)); g.setAttribute('aOrigN', new THREE.BufferAttribute(on, 3));
+  g.computeBoundingSphere();
   // Image classique (pas ImageBitmap, qui ignore flipY sur certains navigateurs)
   const load = (blob, srgb) => new Promise((res, rej) => { const u = URL.createObjectURL(blob), im = new Image();
     im.onload = () => { const t = new THREE.Texture(im); t.flipY = true; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; t.needsUpdate = true; URL.revokeObjectURL(u); res(t); };
@@ -454,11 +645,13 @@ export async function buildScanObject(THREE, MarchingCubes, rec) {
   const NV = rec.views.length / 12, V = k => new THREE.Vector3(...rec.views.subarray(k, k + 3));
   const uC = [], uR = [], uU = [], uF = [];
   for (let i = 0; i < NV; i++) { uC.push(V(i * 12)); uR.push(V(i * 12 + 3)); uU.push(V(i * 12 + 6)); uF.push(V(i * 12 + 9)); }
+  const pc = rec.paint || rec.base || [.6, .6, .6], rc = rec.roof || pc, srgb = c => new THREE.Color().setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace);
   const material = new THREE.ShaderMaterial({
     uniforms: { uTex: { value: tex }, uMask: { value: mtex }, uC: { value: uC }, uR: { value: uR }, uU: { value: uU }, uF: { value: uF },
-      uFN: { value: new THREE.Vector2(...rec.fN) }, uOpacity: { value: 1 }, uBase: { value: new THREE.Color(...rec.base) } },
+      uFN: { value: new THREE.Vector2(...rec.fN) }, uOpacity: { value: 1 }, uGloss: { value: .6 },
+      uPaint: { value: srgb(pc) }, uRoof: { value: srgb(rc) }, uH: { value: rec.dims.H } },
     vertexShader: VS, fragmentShader: FS(NV), side: THREE.DoubleSide, toneMapped: false, transparent: false
   });
   const mesh = new THREE.Mesh(g, material), group = new THREE.Group(); group.add(mesh);
-  return { group, material, dims: rec.dims, triangles: cnt / 3 };
+  return { group, material, dims: rec.dims, triangles: I.length / 3 };
 }
