@@ -15,7 +15,7 @@ Adresse prévue : **https://florentin2908.github.io/Vigie/** (GitHub Pages, bran
 Pour l'installer :
 - **Android** (téléphone ou autoradio) : ouvre l'adresse dans Chrome, puis menu > « Installer l'appli ». Un appui long sur l'icône propose « Mode autoradio », « Ajouter un plein » et « Mécano ».
 - **iPhone** : dans Safari, Partager > « Sur l'écran d'accueil ».
-- Pour un écran de voiture : Garage > Écran de voiture > « Au démarrage de Vigie : ouvrir le mode autoradio », ou l'adresse `…/vigie/?mode=autoradio`.
+- Pour un écran de voiture : Garage > Écran de voiture > « Au démarrage de Vigie : ouvrir le mode autoradio », ou l'adresse `https://florentin2908.github.io/Vigie/?mode=autoradio`.
 
 ## La vue 360° de ta voiture
 
