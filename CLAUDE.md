@@ -38,7 +38,7 @@ Après chaque passage validé : construire `docs/`, commit, push sur `main` du d
 
 ## Adresses
 
-- Site (GitHub Pages, branche `main`, dossier `/docs`) : **https://florentin2908.github.io/Vigie/** — dépôt créé le 18 nov. 2026 ; le site répond dès que Pages est activé (Settings > Pages > Branch `main`, dossier `/docs`).
+- Site (GitHub Pages, branche `main`, dossier `/docs`) : **https://florentin2908.github.io/Vigie/** — en ligne depuis le 18 nov. 2026 (Pages activé par Florentin). Chaque push sur `main` redéploie le site (workflow GitHub « pages build and deployment », environ 30 s). Les sessions Claude Code sur le web n'ouvrent pas forcément github.io (réseau limité) : vérifier le déploiement avec la liste des workflows du dépôt.
 - Artefact Claude : https://claude.ai/artifact/D65wicG7UAsTbm8npDVZhe — y publier `index.html` tel quel, avec `changelog.json`, `roadmap.md`, `banc-de-test.txt` (copie de `outils/check.py`), et pour le scan 3D `scan3d.js` et `vendor/mediapipe/*` aux mêmes chemins. Relire la version en ligne avant (elle peut avoir changé).
 
 ## Connexion à GitHub

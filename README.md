@@ -10,7 +10,7 @@ Elle lit la voiture avec un petit boîtier OBD2 Bluetooth BLE (15 à 30 €). Sa
 
 ## Le site
 
-Adresse prévue : **https://florentin2908.github.io/Vigie/** (GitHub Pages, branche `main`, dossier `/docs`).
+Adresse : **https://florentin2908.github.io/Vigie/** (GitHub Pages, branche `main`, dossier `/docs` ; en ligne depuis le 18 nov. 2026).
 
 Pour l'installer :
 - **Android** (téléphone ou autoradio) : ouvre l'adresse dans Chrome, puis menu > « Installer l'appli ». Un appui long sur l'icône propose « Mode autoradio », « Ajouter un plein » et « Mécano ».
