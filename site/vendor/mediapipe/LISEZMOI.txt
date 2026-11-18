@@ -1,5 +1,6 @@
 MediaPipe Tasks Vision 0.10.18 (Google, licence Apache 2.0) — https://github.com/google-ai-edge/mediapipe
 - vision_bundle.mjs, vision_wasm_internal.js, vision_wasm_internal.wasm : paquet npm @mediapipe/tasks-vision@0.10.18
-- deeplab_v3.tflite : modèle DeepLab v3 (classes PASCAL VOC, dont « car »),
+- deeplab_v3.tflite.b64.txt : modèle DeepLab v3 (classes PASCAL VOC, dont « car »), écrit en base64 (texte) pour que
+  la page Claude puisse le servir ; scan3d.js le décode avant de le donner à MediaPipe. Fichier d'origine :
   https://storage.googleapis.com/mediapipe-models/image_segmenter/deeplab_v3/float32/1/deeplab_v3.tflite
 Utilisés par scan3d.js pour détourer la voiture sur chaque image du scan, sur l'appareil.

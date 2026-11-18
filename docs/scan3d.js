@@ -78,9 +78,14 @@ let segP = null;
 export function loadSegmenter() {
   if (!segP) segP = (async () => {
     const vision = await import(HERE + 'vendor/mediapipe/vision_bundle.mjs');
+    // Le modèle est rangé en base64 (texte) : la page Claude ne sert pas les fichiers .tflite
+    const res = await fetch(HERE + 'vendor/mediapipe/deeplab_v3.tflite.b64.txt'); if (!res.ok) throw new Error('modele');
+    const b64 = (await res.text()).trim(), bin = atob(b64), model = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) model[i] = bin.charCodeAt(i);
+    if (String.fromCharCode(...model.subarray(4, 8)) !== 'TFL3') throw new Error('modele');
     const seg = await vision.ImageSegmenter.createFromOptions(
       { wasmLoaderPath: HERE + 'vendor/mediapipe/vision_wasm_internal.js', wasmBinaryPath: HERE + 'vendor/mediapipe/vision_wasm_internal.wasm' },
-      { baseOptions: { modelAssetPath: HERE + 'vendor/mediapipe/deeplab_v3.tflite', delegate: 'CPU' }, runningMode: 'IMAGE', outputCategoryMask: true, outputConfidenceMasks: false });
+      { baseOptions: { modelAssetBuffer: model, delegate: 'CPU' }, runningMode: 'IMAGE', outputCategoryMask: true, outputConfidenceMasks: false });
     const labels = seg.getLabels().map(s => String(s).toLowerCase());
     const keep = ['car', 'bus'].map(k => labels.indexOf(k)).filter(i => i >= 0);
     if (!keep.length) throw new Error('modele');
