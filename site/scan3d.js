@@ -592,7 +592,7 @@ const FS = (n) => `uniform sampler2D uTex;uniform sampler2D uMask;uniform vec3 u
 uniform vec2 uFN;uniform float uOpacity;uniform vec3 uPaint;uniform vec3 uRoof;uniform float uH;uniform float uGloss;uniform float uReveal;uniform float uScan;varying vec3 vO;varying vec3 vN;varying vec3 vWP;varying vec3 vWN;varying float vY;
 void main(){
   if(vY>uReveal)discard;
-  if(uScan>0.001&&!gl_FrontFacing){gl_FragColor=vec4(vec3(0.05,0.22,0.36)+vec3(0.30,0.65,0.85)*0.45*uScan,uOpacity); // coupe du scanner : tranche lumineuse
+  if(uScan>0.001&&!gl_FrontFacing){float sl=0.75+0.25*step(0.5,fract(gl_FragCoord.y*0.2));gl_FragColor=vec4((vec3(0.03,0.12,0.21)+vec3(0.16,0.42,0.58)*0.45*uScan)*sl,uOpacity); // coupe du scanner : tranche lumineuse
     #include <colorspace_fragment>
     return;}
   vec3 n=normalize(vN);vec3 acc=vec3(0.0);float ws=0.0;float wmax=0.0;

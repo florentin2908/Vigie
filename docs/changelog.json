@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.18",
+      "date": "18 nov. 2026",
+      "items": [
+        "Nouvelle intro, comme un petit film : la caméra longe ta voiture dans la pénombre, une barre de lumière glisse sur la carrosserie, puis les phares s'allument",
+        "Le logo Vigie se dessine au-dessus du nom, et la voiture finit de trois quarts, sous le même angle que sur l'accueil",
+        "Avec ta voiture scannée, le scanner la révèle pendant le travelling, et elle arrive sur l'accueil sans attente",
+        "Sur un écran de voiture, le titre reste au-dessus de la voiture"
+      ]
+    },
+    {
       "version": "0.17",
       "date": "18 nov. 2026",
       "items": [

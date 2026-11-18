@@ -1253,6 +1253,18 @@ body.ev .fuel-only{display:none}
 #splash .hud{display:none}
 #splash .title{top:calc(env(safe-area-inset-top,0px) + 14%);bottom:auto;gap:10px;transition:opacity .8s,transform .8s var(--ease)}
 #splash.t-out .title{opacity:0;transform:translateY(-12px)}
+/* Logo Vigie (v0.18) : le cadran se dessine, l'aiguille se lève, puis le nom apparaît */
+@media (orientation:landscape) and (max-height:700px){#splash .title{top:calc(env(safe-area-inset-top,0px) + 5%)}} /* écran de voiture : titre au-dessus de la voiture */
+#splash .mark{width:42px;height:42px;opacity:0;transform:scale(.82);filter:drop-shadow(0 0 10px rgba(124,227,255,.6));overflow:visible}
+#splash .mark .arc{fill:none;stroke:#fff;stroke-width:5;stroke-linecap:round;stroke-dasharray:125;stroke-dashoffset:125}
+#splash .mark .ndl{stroke:#fff;stroke-width:4;stroke-linecap:round;transform-origin:32px 34px;transform:rotate(-80deg)}
+#splash .mark circle{fill:#fff}
+#splash.t-title .mark{animation:markIn .45s var(--ease) forwards}
+#splash.t-title .mark .arc{animation:arcDraw .85s .05s var(--ease) forwards}
+#splash.t-title .mark .ndl{animation:ndlUp 1s .3s cubic-bezier(.3,1.5,.5,1) forwards}
+@keyframes markIn{to{opacity:1;transform:none}}
+@keyframes arcDraw{to{stroke-dashoffset:0}}
+@keyframes ndlUp{to{transform:rotate(10deg)}}
 .hello{position:absolute;left:calc(env(safe-area-inset-left,0px) + 26px);right:26px;bottom:calc(env(safe-area-inset-bottom,0px) + 10%);pointer-events:none;opacity:0;transform:translateY(14px);transition:opacity .9s,transform .9s var(--ease)}
 #splash.t-hello .hello{opacity:1;transform:none}
 .hl-t{font-size:40px;font-weight:200;color:#fff;letter-spacing:-.005em;line-height:1.1;text-shadow:0 2px 24px rgba(10,6,60,.45);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1397,6 +1409,7 @@ body.radio-on .shell{visibility:hidden}
     </div>
   </div>
   <div class="title">
+    <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><path class="arc" d="M12 46 A23 23 0 1 1 52 46"/><line class="ndl" x1="32" y1="34" x2="39" y2="16"/><circle cx="32" cy="34" r="4.5"/></svg>
     <div class="word3d" aria-label="Vigie"><span style="--i:0">V</span><span style="--i:1">I</span><span style="--i:2">G</span><span style="--i:3">I</span><span style="--i:4">E</span></div>
     <div class="rule"></div>
     <div class="tag" data-intro="sub">Ta voiture, en clair.</div>
@@ -3609,11 +3622,12 @@ window.__introStart=function(gl){
   if(!gl)splash.classList.add('nogl');
   if(reduce){introInfo(true);['s1','s2','s3','s4','t-title','t-tag','t-hello'].forEach(c=>splash.classList.add(c));setTimeout(endSplash,900);return true;}
   // Face avant → phares → titre → « Bonjour » et vue de trois quarts
-  [[0,'s1'],[380,'s2'],[1100,'s3'],[1500,'s4'],[1950,'t-title'],[2400,'t-tag'],[3500,'t-out'],[3800,'t-hello']].forEach(([ms,c])=>setTimeout(()=>splash.classList.add(c),ms));
-  setTimeout(()=>introInfo(true),3600);
+  // v0.18 : flanc (0-2,3 s), phares et logo (2,3-3,6 s), pose de trois quarts et « Bonjour » (3,6-6 s)
+  [[0,'s1'],[380,'s2'],[1100,'s3'],[1500,'s4'],[2450,'t-title'],[2850,'t-tag'],[4150,'t-out'],[4400,'t-hello']].forEach(([ms,c])=>setTimeout(()=>splash.classList.add(c),ms));
+  setTimeout(()=>introInfo(true),4250);
   const t0=performance.now();
   (function pct(){const k=clamp((performance.now()-t0-1100)/1200,0,1);const bp=$('#bootPct');if(bp)bp.textContent=String(Math.round(k*100));if(k<1&&!splashDone)requestAnimationFrame(pct);})();
-  setTimeout(endSplash,5600);
+  setTimeout(endSplash,6000);
   return true;
 };
 // Sans 3D au bout de 2,6 s : intro sans 3D. Plus de patience si l'intro prépare ta voiture scannée (window.__introWait).
@@ -3910,7 +3924,7 @@ function fitDist(cam,w,h){const tv=Math.tan(THREE.MathUtils.degToRad(cam.fov/2))
 
 /* ---------- Voiture scannée partagée (v0.17) : préparée une seule fois, pour l'intro puis pour l'appli ---------- */
 const SCANX={key:'',p:null,obj:null};
-let scanMods=null,introRelease=Promise.resolve();   // l'intro rend la voiture à l'appli quand elle a fini (un objet 3D n'a qu'une scène)
+let scanMods=null;
 function scanBuild(rec){
   const k='scan:'+rec.date;
   if(SCANX.key===k&&SCANX.p)return SCANX.p;
@@ -3920,7 +3934,14 @@ function scanBuild(rec){
   p.catch(()=>{scanMods=null;if(SCANX.p===p){SCANX.key='';SCANX.p=null;}});
   return p;
 }
-function scanForget(o){if(o&&SCANX.obj===o){SCANX.key='';SCANX.p=null;SCANX.obj=null;}}
+function scanForget(o){if(o&&SCANX.obj===(o.orig||o)){SCANX.key='';SCANX.p=null;SCANX.obj=null;}}
+// Copie pour l'appli (l'intro garde l'original) : même forme et mêmes images, matériau à part ; pas d'attente entre les deux
+function scanCopy(o){
+  const m=o.material.clone(),u=m.uniforms,src=o.material.uniforms;
+  u.uTex.value=src.uTex.value;u.uMask.value=src.uMask.value;u.uReveal.value=99;u.uScan.value=0;u.uOpacity.value=1;
+  const group=new THREE.Group();group.add(new THREE.Mesh(o.group.children[0].geometry,m));
+  return {group,material:m,dims:o.dims,triangles:o.triangles,front:o.front,orig:o};
+}
 const waitMs=ms=>new Promise(r=>setTimeout(()=>r(null),ms));
 
 /* ================== DÉMARRAGE ================== */
@@ -3954,14 +3975,13 @@ function introScene(renderer,so){
   LS.key.intensity=0;LS.soft.intensity=0;LS.side.intensity=0;LS.rim.intensity=0;
   const cam=new THREE.PerspectiveCamera(32,1,.1,100);
   const X=tex(),RM=!!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
-  let car,fx,glows=[],streaks=[],pools=[],wide=null,ring=null,U=null,release=null;
+  let car,fx,glows=[],streaks=[],pools=[],wide=null,ring=null,U=null;
   if(so){
     // Ta voiture scannée, révélée par un faisceau de scanner qui monte du sol au toit
     useDims(so.dims);car=so;scene.add(so.group);fx={group:new THREE.Group()};scene.add(fx.group); // ombre et anneaux à part : l'objet reste intact pour l'appli
     U=so.material.uniforms;U.uReveal.value=RM?99:-.1;U.uScan.value=RM?0:1;
     ring=new THREE.Mesh(new THREE.RingGeometry(.965,1,160),new THREE.MeshBasicMaterial({color:0x9fe9ff,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));
     ring.rotation.x=-Math.PI/2;ring.scale.set((T.F-T.R)/2+.35,HALF+.35,1);scene.add(ring);
-    introRelease=new Promise(r=>{release=()=>{U.uReveal.value=99;U.uScan.value=0;scene.remove(so.group);r();};});
     window.VigieState.introCar='scan';
   }else{
     useBody(S().body);
@@ -3979,6 +3999,31 @@ function introScene(renderer,so){
     window.VigieState.introCar='dessin';
   }
   const gr=addGround(scene,fx,{reveal:0});
+  // Barre de lumière verticale qui glisse le long du flanc droit (voiture dessinée : reflet qui court dans le vernis)
+  const sweep=new THREE.RectAreaLight(0xf2f5ff,0,.95,3.4);scene.add(sweep);
+  // Au début, la voiture dessinée reste dans la pénombre (reflets du studio atténués) : seule la barre la dessine
+  const envMats=so?[]:Object.values(car.mats).filter(m=>m&&m.envMapIntensity!==undefined).map(m=>[m,m.envMapIntensity]);
+  // Trajet de la caméra (v0.18). Repère de la voiture : avant vers +x, côté droit vers +z. Chaque étape : angle autour de
+  // la voiture (th), hauteur (e), cadre à faire tenir (largeur w × hauteur h, en mètres), point visé (x, y).
+  // Plan bas le long du flanc (arrière → avant), passage devant pour les phares, puis pose de trois quarts avant droit,
+  // le même angle que la vue de l'accueil : l'appli enchaîne sans coupure.
+  const cr=(a,b,c,d,u)=>.5*(2*b+(c-a)*u+(2*a-5*b+4*c-d)*u*u+(3*b-a-3*c+d)*u*u*u);
+  const len0=T.F-T.R;
+  function camKeys(){const p=cam.aspect<1,hw=p?Math.max(4.8,len0+1.2):Math.max(7.6,len0+3.0),hh=p?Math.max(3.4,T.roof+1.8):Math.max(4.8,T.roof+3.2),hy=p?.25:.78;
+    // en paysage (écran de voiture, ordinateur) : plans moins serrés, et voiture plus bas pour laisser le titre au-dessus
+    return [{th:2.6,e:.07,w:p?1.8:5.2,h:p?1.3:1.9,x:T.R*.4,y:.5},{th:1.8,e:.09,w:p?2.2:len0*1.1,h:p?1.4:1.9,x:.2,y:.55},
+            {th:.4,e:.05,w:HALF*2+(p?.6:2.6),h:p?1.5:2.0,x:T.F*.3,y:.55},{th:.66,e:.2,w:hw,h:hh,x:0,y:hy},{th:.97,e:.26,w:hw,h:hh,x:0,y:hy}];}
+  function camPose(ms){
+    const K=camKeys(),q={},F=['th','e','w','h','x','y'];
+    if(ms<3600){const s=ease(cl(ms/3600))*3,i=Math.min(2,Math.floor(s)),u=s-i,g=j=>K[Math.max(0,Math.min(3,j))];
+      for(const f of F)q[f]=cr(g(i-1)[f],g(i)[f],g(i+1)[f],g(i+2)[f],u);}
+    else{const u=ease(cl((ms-3600)/2400));for(const f of F)q[f]=lerp(K[3][f],K[4][f],u);}
+    // objectif large pour les plans rapprochés, puis celui de l'accueil pour la pose finale
+    const fov=lerp(cam.aspect<1?48:38,32,ease(cl((ms-2600)/1400)));if(Math.abs(cam.fov-fov)>.01){cam.fov=fov;cam.updateProjectionMatrix();}
+    const d=fitDist(cam,q.w,q.h),ce=Math.cos(q.e);
+    cam.position.set(q.x+Math.cos(q.th)*ce*d,q.y+Math.sin(q.e)*d,Math.sin(q.th)*ce*d);
+    cam.lookAt(q.x,q.y,0);
+  }
   // Halo lumineux (phares, scanner, sol) avec post-traitement
   let composer=null,bloom=null;
   try{composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,cam));bloom=new UnrealBloomPass(new THREE.Vector2(256,256),0,.28,1.0);composer.addPass(bloom);composer.addPass(new OutputPass());}catch(e){composer=null;}
@@ -3989,56 +4034,53 @@ function introScene(renderer,so){
   cam.position.set(9,1,0);cam.lookAt(0,.55,0);
   try{renderer.compile(scene,cam);draw();}catch(e){}   // textures et matériaux envoyés à la carte graphique avant le départ
   let t0=0;
-  const free=()=>{if(release){release();release=null;}};
   return function start(){
-    if(!window.__introStart||!window.__introStart(true)){removeEventListener('resize',size);free();renderer.dispose();return;}
+    if(!window.__introStart||!window.__introStart(true)){removeEventListener('resize',size);renderer.dispose();return;}
     t0=performance.now();requestAnimationFrame(frame);
   };
   function frame(){
     if(window.__splashDone){
       removeEventListener('resize',size);
-      const end=performance.now()+900;(function tail(){if(performance.now()<end){draw();requestAnimationFrame(tail);}else{free();renderer.dispose();try{renderer.forceContextLoss();}catch(e){}}})();
+      const end=performance.now()+900;(function tail(){if(performance.now()<end){draw();requestAnimationFrame(tail);}else{renderer.dispose();try{renderer.forceContextLoss();}catch(e){}}})();
       return;
     }
-    const ms=performance.now()-t0,t=ms/1000,k=ease(cl((ms-3500)/1900));
-    // 1. La voiture sort de l'ombre
-    const Lk=ease(cl((ms-150)/1300));
-    LS.key.intensity=keyMax*Lk;LS.soft.intensity=softMax*Lk;LS.side.intensity=sideMax*Lk;LS.rim.intensity=rimMax*Lk;
-    gr.floorMat.uniforms.uTime.value=t;
-    gr.floorMat.uniforms.uReveal.value=easeOut(cl((ms-200)/1500))*9;
-    gr.floorMat.uniforms.uBoost.value=(1-cl((ms-900)/900))*.8;
-    gr.ringMat.opacity=cl((ms-500)/700)*.45;gr.arcMat.opacity=cl((ms-700)/700)*.28;gr.arc.rotation.z=t*.3;
+    const ms=RM?6000:performance.now()-t0,t=ms/1000,s01=(a,b)=>cl((ms-a)/(b-a)),hero=ease(s01(3000,4300));
+    // 1. Pénombre et contre-jour ; la barre de lumière court le long du flanc, puis la lumière de studio monte
+    LS.rim.intensity=rimMax*(.35+.65*ease(s01(0,2400)));
+    LS.soft.intensity=softMax*(.15*ease(s01(200,1600))+.85*ease(s01(2200,3200)));
+    LS.key.intensity=keyMax*ease(s01(1800,3000));LS.side.intensity=sideMax*ease(s01(2400,3400));
+    const sw=s01(150,2300);sweep.intensity=so?0:9*Math.sin(Math.PI*sw);
+    const envK=.12+.88*ease(s01(1700,3000));envMats.forEach(([m,v])=>{m.envMapIntensity=v*envK;});
+    sweep.position.set(lerp(T.R-1.8,T.F+1.8,ease(sw)),1.05,HALF+2.1);sweep.lookAt(sweep.position.x,.62,0);
+    const fu=gr.floorMat.uniforms;fu.uTime.value=t;
+    fu.uReveal.value=easeOut(s01(200,1700))*9;fu.uBoost.value=(1-s01(900,1800))*.8;
+    // onde au sol quand les phares s'allument (ou quand le scanner arrive au toit)
+    const pw=s01(2300,3700);fu.uPulse.value=1+pw*6.5;fu.uPulseAmp.value=ms>2300&&!RM?(1-pw)*.9:0;
+    gr.ringMat.opacity=s01(500,1200)*.45;gr.arcMat.opacity=s01(700,1400)*.28;gr.arc.rotation.z=t*.3;
     if(so){
-      // 2. Le scanner monte du sol au toit (0,55 → 2,35 s, quand le voile noir du départ s'est éclairci) : la voiture apparaît
-      //    sous la ligne lumineuse, puis prend ses vraies couleurs
+      // 2. Le scanner monte du sol au toit (0,35 → 2,25 s) pendant que la caméra longe la voiture : elle apparaît sous la
+      //    ligne lumineuse, puis prend ses vraies couleurs
       if(!RM){
-        const sb=cl((ms-550)/1800),y=lerp(-.05,T.roof+.08,ease(sb)),g=1-cl((ms-2250)/600);
+        const sb=s01(350,2250),y=lerp(-.05,T.roof+.08,ease(sb)),g=1-s01(2200,2800);
         U.uReveal.value=y;U.uScan.value=g;
         ring.position.y=y;ring.material.opacity=Math.sin(Math.PI*cl(sb*1.06))*.85*g;
         if(bloom)bloom.strength=.12+.34*g*(1-.6*sb*sb);
       }else if(bloom)bloom.strength=.12;
     }else{
-      // 2. Les phares s'allument (lumière « HDR » : seuls eux produisent le halo)
-      const L=cl((ms-1500)/160),burst=Math.max(0,1-(ms-1500)/900);
+      // 2. Les phares s'allument quand la caméra passe devant (lumière « HDR » : seuls eux produisent le halo)
+      const L=s01(2300,2460),burst=RM?0:Math.max(0,1-(ms-2300)/900);
       car.mats.head.color.setRGB(lerp(.05,1.7,L),lerp(.08,1.8,L),lerp(.1,2.0,L));
-      car.mats.tail.color.setRGB(lerp(.08,2.2,L),lerp(.02,.3,L),lerp(.02,.3,L));
-      glows.forEach(g=>{g.material.opacity=L*.42;g.scale.setScalar(g.userData.base*(.8+burst*.6*L));});
-      const sk=easeOut(cl((ms-1500)/550)),fl=L*(.5+.5*burst);
+      car.mats.tail.color.setRGB(lerp(.75,2.2,L),lerp(.04,.3,L),lerp(.04,.3,L));
+      glows.forEach(g=>{g.material.opacity=L*.42;g.scale.setScalar(g.userData.base*(.5+.3*hero+burst*.35*L));}); // halos plus petits en gros plan
+      const sk=easeOut(s01(2300,2850)),fl=L*(.5+.5*burst)*(1-.6*hero);
       streaks.forEach(st=>{st.material.opacity=fl*.7;st.scale.set(lerp(.4,6.5,sk),.06,1);});
       wide.material.opacity=fl*.45;wide.scale.set(lerp(.6,13,sk),.045,1);
       pools.forEach(pl=>pl.material.opacity=L*.5);
-      if(bloom)bloom.strength=.12+L*(.10+burst*.34)*(1-.45*k);   // halo plus doux en trois quarts (capot moins éblouissant)
+      if(bloom)bloom.strength=.12+L*(.10+burst*.26)*(1-.45*hero);   // halo plus doux en trois quarts (capot moins éblouissant)
     }
-    gr.under.material.opacity=.3*Lk;
-    // 3. Caméra : face avant qui avance doucement, puis trois quarts avant à l'arrivée du « Bonjour »
-    const portrait=cam.aspect<1;
-    const dF=fitDist(cam,HALF*2+(portrait?2.3:5.2),T.roof+(portrait?2.6:3.1));
-    const d3=fitDist(cam,portrait?Math.max(4.8,len+1.2):Math.max(7.6,len+3.0),portrait?Math.max(3.4,T.roof+1.8):Math.max(4.2,T.roof+2.6));
-    const ang=lerp(Math.PI/2,Math.PI/2+.85,k),elev=lerp(.05,.2,k);
-    const d=lerp(dF*lerp(1.16,1,ease(cl(ms/3300))),d3,k);
-    const ty=.55;
-    cam.position.set(Math.sin(ang)*Math.cos(elev)*d,Math.sin(elev)*d+ty,Math.cos(ang)*Math.cos(elev)*d);
-    cam.lookAt(0,ty-(portrait?.1:0)-k*(portrait?.2:.45),0);
+    gr.under.material.opacity=.3*ease(s01(150,1450));
+    // 3. Caméra : flanc, avant, puis pose de trois quarts (voir camPose)
+    camPose(ms);
     draw();
     requestAnimationFrame(frame);
   }
@@ -4060,10 +4102,11 @@ function runApp(){
   function scanPrep(k,rec){
     if(SC.pending===k||SC.failed===k||(SC.ready&&SC.ready.key===k))return;
     SC.pending=k;window.VigieState.scan3d={state:'prépa'};
-    // Même objet que l'intro (préparé une seule fois) ; on attend que l'intro l'ait rendu
-    Promise.all([scanBuild(rec),Promise.race([introRelease,waitMs(4000)])]).then(([o])=>{ // 4 s au plus, si l'intro s'était arrêtée en route
-      if(SC.pending!==k){if(!(car&&car.scan===o)){disposeTree(o.group);scanTexDispose(o);scanForget(o);}return;}
-      if(SC.ready&&SC.ready.obj!==o){disposeTree(SC.ready.obj.group);scanTexDispose(SC.ready.obj);scanForget(SC.ready.obj);}
+    // Objet préparé une seule fois (souvent déjà prêt grâce à l'intro) ; l'appli en prend une copie
+    scanBuild(rec).then(o0=>{
+      const o=scanCopy(o0);
+      if(SC.pending!==k){disposeTree(o.group);return;}
+      if(SC.ready){disposeTree(SC.ready.obj.group);}
       SC.ready={key:k,obj:o};SC.pending='';
     },e=>{if(SC.pending===k){SC.pending='';SC.failed=k;}window.VigieState.scan3d={state:'échec',err:String(e&&e.message||e).slice(0,200)};});
   }

@@ -20,6 +20,7 @@ Propriétaire : Florentin (compte GitHub `florentin2908`). Textes de l'appli en 
 | `outils/construire-site.py` | Construit `docs/` (le site) |
 | `outils/check.py` | Banc de test automatique (dans l'artefact : `banc-de-test.txt`) |
 | `outils/video-de-test.py`, `outils/essai-scan.py` | Vidéo de synthèse d'une voiture filmée en tournant, et mesure de précision du scan 3D |
+| `outils/film-intro.py` | Film de l'intro image par image (temps piloté), pour la revoir et la régler |
 | `docs/` | Site construit, servi par GitHub Pages. Ne jamais l'éditer à la main |
 
 ## Construire, tester, publier
