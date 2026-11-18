@@ -16,9 +16,10 @@ Propriétaire : Florentin (compte GitHub `florentin2908`). Textes de l'appli en 
 | `index.html` | Toute l'appli. Format « contenu de page seul » (pas de doctype ni de `<body>`), le même que dans l'artefact Claude |
 | `changelog.json` | Nouveautés affichées dans l'appli |
 | `roadmap.md` | Feuille de route, règles, carte du code, journal |
-| `site/` | Appli installable : `manifest.webmanifest`, `sw.js` (ligne `const VERSION = 'vigie-dev';` remplacée à la construction), icônes |
+| `site/` | Appli installable : `manifest.webmanifest`, `sw.js` (ligne `const VERSION = 'vigie-dev';` remplacée à la construction), icônes ; scan 3D : `scan3d.js` et `vendor/mediapipe/` (détourage, 13 Mo) |
 | `outils/construire-site.py` | Construit `docs/` (le site) |
 | `outils/check.py` | Banc de test automatique (dans l'artefact : `banc-de-test.txt`) |
+| `outils/video-de-test.py`, `outils/essai-scan.py` | Vidéo de synthèse d'une voiture filmée en tournant, et mesure de précision du scan 3D |
 | `docs/` | Site construit, servi par GitHub Pages. Ne jamais l'éditer à la main |
 
 ## Construire, tester, publier
@@ -27,7 +28,8 @@ Propriétaire : Florentin (compte GitHub `florentin2908`). Textes de l'appli en 
 python3 outils/construire-site.py                      # reconstruit docs/
 npm install --prefix /tmp/vigie-deps three@0.160.0 leaflet@1.9.4   # une fois
 pip install playwright pillow                          # une fois ; ffmpeg doit être installé
-python3 outils/check.py docs /tmp/vigie-out --deps /tmp/vigie-deps  # environ 10 min
+python3 outils/check.py docs /tmp/vigie-out --deps /tmp/vigie-deps  # environ 15 min (fabrique aussi la vidéo de test du scan)
+python3 outils/video-de-test.py /tmp/scan && python3 outils/essai-scan.py /tmp/scan /tmp/scan-out  # précision du scan seul
 ```
 
 Le banc doit finir avec 0 erreur et 0 débordement. Il écrit `report.json` et `contact.jpg` (planche de captures à regarder).
@@ -37,7 +39,7 @@ Après chaque passage validé : construire `docs/`, commit, push sur `main` du d
 ## Adresses
 
 - Site (GitHub Pages, branche `main`, dossier `/docs`) : **https://florentin2908.github.io/Vigie/** — dépôt créé le 18 nov. 2026 ; le site répond dès que Pages est activé (Settings > Pages > Branch `main`, dossier `/docs`).
-- Artefact Claude : https://claude.ai/artifact/D65wicG7UAsTbm8npDVZhe — y publier `index.html` tel quel, avec `changelog.json`, `roadmap.md` et `banc-de-test.txt` (copie de `outils/check.py`). Relire la version en ligne avant (elle peut avoir changé).
+- Artefact Claude : https://claude.ai/artifact/D65wicG7UAsTbm8npDVZhe — y publier `index.html` tel quel, avec `changelog.json`, `roadmap.md`, `banc-de-test.txt` (copie de `outils/check.py`), et pour le scan 3D `scan3d.js` et `vendor/mediapipe/*` aux mêmes chemins. Relire la version en ligne avant (elle peut avoir changé).
 
 ## Connexion à GitHub
 
@@ -48,7 +50,7 @@ Florentin se connecte lui-même. Ne jamais lui demander de mot de passe ni de je
 ## Règles qui ne se discutent pas (détail dans roadmap.md §2)
 
 - Jamais de fausse donnée présentée comme réelle : le mode démo est toujours signalé.
-- Aucune reproduction de modèle de voiture réel ni de logo ; la vraie voiture du client = sa photo ou sa vue 360°.
-- Données seulement sur l'appareil (localStorage, IndexedDB pour la vue 360°) ; rien n'est envoyé.
+- Aucune reproduction de modèle de voiture réel ni de logo ; la vraie voiture du client = sa photo, sa vue 360° ou son scan 3D (calculé sur son appareil, jamais un modèle téléchargé).
+- Données seulement sur l'appareil (localStorage, IndexedDB pour la vue 360° et le scan 3D) ; rien n'est envoyé.
 - Mode autoradio : aucune vidéo, caméra de recul coupée en roulant, pas de bouton factice (verrouillage, climatisation).
 - `prefers-reduced-motion` respecté ; `localStorage` et IndexedDB toujours dans un `try/catch`.

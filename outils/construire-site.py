@@ -6,7 +6,7 @@ Usage : python3 outils/construire-site.py
 - index.html (à la racine) est au format « contenu de page seul », comme dans l'artefact Claude :
   pas de <!doctype>, <html>, <head> ni <body>. Le script l'entoure du squelette complet
   (doctype, langue, manifeste de l'appli installable, icônes, zones sûres du téléphone).
-- copie changelog.json et tout le dossier site/ (manifeste, service hors ligne, icônes) ;
+- copie changelog.json et tout le dossier site/ (manifeste, service hors ligne, icônes, scan3d.js, vendor/) ;
 - écrit la version du changelog dans sw.js, pour que le téléphone reçoive chaque nouvelle version ;
 - ajoute docs/.nojekyll (GitHub Pages sert les fichiers tels quels).
 """
@@ -26,7 +26,7 @@ SKELETON = (
     '<!doctype html><html lang="fr"><head><meta charset="utf-8">'
     '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
     '<meta name="description" content="Vigie, l\'appli compagnon de ta voiture : autonomie, pneus, batterie, codes défaut, '
-    'carnet de pleins, vue 360° de ta voiture, assistant Mécano et mode autoradio en 3D.">'
+    'carnet de pleins, ta voiture scannée en 3D, assistant Mécano et mode autoradio en 3D.">'
     '<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg" type="image/svg+xml">'
     '<link rel="apple-touch-icon" href="icon-192.png"><meta name="mobile-web-app-capable" content="yes">'
     '<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Vigie">'
@@ -58,6 +58,7 @@ def main():
     for name in sorted(os.listdir(SITE)):
         src = os.path.join(SITE, name)
         if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(DOCS, name))  # ex. vendor/ : outils de scan 3D (MediaPipe)
             continue
         if name == 'sw.js':
             text = open(src, encoding='utf-8').read()
@@ -70,7 +71,7 @@ def main():
     open(os.path.join(DOCS, '.nojekyll'), 'w').close()
 
     files = sorted(os.listdir(DOCS))
-    size = sum(os.path.getsize(os.path.join(DOCS, n)) for n in files)
+    size = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(DOCS) for f in fs)
     print(f'Site construit dans docs/ : Vigie v{version}, {len(files)} fichiers, {size // 1024} Ko')
     for n in files:
         print('  -', n)

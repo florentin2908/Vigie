@@ -1,4 +1,4 @@
-<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="description" content="Vigie, l'appli compagnon de ta voiture : autonomie, pneus, batterie, codes défaut, carnet de pleins, vue 360° de ta voiture, assistant Mécano et mode autoradio en 3D."><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="icon-192.png"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Vigie"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#15114f;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="description" content="Vigie, l'appli compagnon de ta voiture : autonomie, pneus, batterie, codes défaut, carnet de pleins, ta voiture scannée en 3D, assistant Mécano et mode autoradio en 3D."><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="icon-192.png"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Vigie"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#15114f;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Vigie</title>
 <meta name="theme-color" content="#03050b">
 <script>document.documentElement.lang='fr';</script>
@@ -1769,27 +1769,31 @@ body.radio-on .shell{visibility:hidden}
       <div class="btnrow"><button class="btn" id="photoAdd" type="button">Ajouter une photo</button><button class="btn ghost danger" id="photoDel" type="button" hidden>Supprimer</button></div>
     </div>
     <div class="glass card rise" id="spinCard">
-      <div class="ch"><span class="h2">Vue 360° de ta voiture</span><span class="chip info"><span class="dot"></span><span>Reste sur cet appareil</span></span></div>
+      <div class="ch"><span class="h2">Ta voiture en 3D</span><span class="chip info"><span class="dot"></span><span>Reste sur cet appareil</span></span></div>
       <div class="spin-prev spin-view" id="spinPrev" role="img" aria-label="Ta voiture en 360° : glisse pour la faire tourner" hidden><img alt="" draggable="false"><span class="spin-ang" aria-hidden="true"><span class="dial"></span><b>0°</b></span></div>
       <div id="spinEmpty">
-        <p class="note">Filme un tour complet de ta vraie voiture : Vigie en tire 36 images, et tu la fais tourner du doigt sur l'accueil. La vidéo n'est jamais envoyée.</p>
+        <p class="note">Filme un tour complet de ta vraie voiture : Vigie la scanne et la refait en vraie 3D, avec ses propres couleurs. Elle remplace le dessin Vigie sur l'accueil, dans Santé, ici et en mode autoradio. Tout se calcule sur ce téléphone : la vidéo n'est jamais envoyée.</p>
         <ul class="tips">
-          <li>Un tour complet, en 20 à 30 secondes, à pas lents.</li>
+          <li>Un tour complet, en 20 à 30 secondes, à pas lents et réguliers.</li>
           <li>Téléphone à l'horizontale, à hauteur des phares.</li>
-          <li>À environ 2 m de la voiture, de jour.</li>
+          <li>À environ 3 m de la voiture : elle reste entière et au milieu de l'écran.</li>
+          <li>De jour, sans autre voiture collée à la tienne.</li>
+          <li>Avec des photos, Vigie fait seulement la vue 360°.</li>
         </ul>
       </div>
       <p class="note" id="spinInfo" hidden>—</p>
+      <p class="note" id="scanInfo" hidden>—</p>
+      <div class="field" id="scanSw" hidden><span class="flab" id="scan-on-l">Sur l'accueil, dans Santé et en mode autoradio</span><label class="switch"><input id="scan-on" type="checkbox" checked aria-labelledby="scan-on-l"><i aria-hidden="true"></i><span id="scan-on-t">Montrer ma voiture scannée en 3D</span></label></div>
       <div class="spin-prog" id="spinProg" hidden><div class="bar"><i id="spinBar"></i></div><span class="label" id="spinProgT">Préparation…</span></div>
       <input type="file" id="spinCam" accept="video/*" capture="environment" hidden>
       <input type="file" id="spinVid" accept="video/*" hidden>
       <input type="file" id="spinPics" accept="image/*" multiple hidden>
       <p class="ferr" id="spinErr" role="alert"></p>
       <div class="btnrow" id="spinBtns">
-        <button class="btn" id="spinFilm" type="button">Filmer le tour de ta voiture</button>
+        <button class="btn" id="spinFilm" type="button">Scanner ma voiture</button>
         <button class="btn ghost" id="spinPick" type="button">Choisir une vidéo</button>
         <button class="btn ghost" id="spinPhotos" type="button">Choisir 8 à 36 photos</button>
-        <button class="btn ghost danger" id="spinDel" type="button" hidden>Supprimer la vue 360°</button>
+        <button class="btn ghost danger" id="spinDel" type="button" hidden>Supprimer</button>
       </div>
     </div>
     </div>
@@ -2191,8 +2195,8 @@ function view(){
   const week=s.week?(isEV()&&!live.connected?s.week.map(x=>Math.round(x*32)/10):s.week):null;const wl=week?week.reduce((a,b)=>a+b,0):null;
   n.weekL=wl;v.weekCost=ok(wl)?`${fmt(wl*p.price,2)} €`:'';v._week=week;
 
-  {const bt=bodyType(),man=p.body&&p.body!=='auto',gs=guessBody(p.car,p.year),nm=BODY_NAMES[bt]+(isEV()?' électrique':'');
-   v.bodyNote=man?`Silhouette ${nm} : un dessin Vigie du type de ta voiture, choisi dans Infos de la voiture.`:gs?`Silhouette ${nm} : un dessin Vigie du type de ta voiture, reconnu d’après « ${p.car} ». Tu peux le changer dans Infos de la voiture.`:`Silhouette ${nm} par défaut. Écris ton modèle ou choisis la carrosserie dans Infos de la voiture.`;}
+  {const bt=bodyType(),man=p.body&&p.body!=='auto',gs=guessBody(p.car,p.year),nm=BODY_NAMES[bt]+(isEV()?' électrique':''),VS=window.VigieState||{};
+   v.bodyNote=VS.scanOn&&VS.scanRec?'Ta vraie voiture, scannée avec ta vidéo : la forme et les couleurs viennent de tes images. La couleur choisie ici sert à l’ambiance de l’appli.':man?`Silhouette ${nm} : un dessin Vigie du type de ta voiture, choisi dans Infos de la voiture.`:gs?`Silhouette ${nm} : un dessin Vigie du type de ta voiture, reconnu d’après « ${p.car} ». Tu peux le changer dans Infos de la voiture.`:`Silhouette ${nm} par défaut. Écris ton modèle ou choisis la carrosserie dans Infos de la voiture.`;}
   v._obdChip=live.connected?['ok','Connecté']:['warn','Mode démo'];
   v.obdNote=live.connected?`Connecté à ${live.deviceName||'ton boîtier'}. Les chiffres viennent de ta voiture.`:'Pas de boîtier connecté. Les chiffres affichés sont des exemples.';
   v._n=n;
@@ -3219,6 +3223,8 @@ function startActions(){if(QS.get('add')==='1'&&!RADIO.on){go('drive');setTimeou
 let PHOTO=null,stageView='3d',viewPref='3d';
 try{const p=localStorage.getItem('vigie.photo');if(p&&p.startsWith('data:image/'))PHOTO=p;const v=localStorage.getItem('vigie.view');viewPref=v==='photo'||v==='spin'?v:'3d';}catch(e){}
 const SPIN={urls:[],imgs:[],n:0,date:null,src:'',busy:false,ms:null,loaded:false};
+const SCAN={rec:null,on:true,ms:null,note:''}; // voiture scannée en 3D (v0.15)
+try{SCAN.on=localStorage.getItem('vigie.scan3d')!=='0';}catch(e){}
 function setStageView(v,persist){
   stageView=v==='photo'&&PHOTO?'photo':v==='spin'&&SPIN.urls.length?'spin':'3d';
   if(persist!==false){viewPref=stageView;try{localStorage.setItem('vigie.view',stageView);}catch(e){}}
@@ -3276,18 +3282,21 @@ const SPIN_N=36,SPIN_W=960;
 let idbP=null;
 function idb(){
   if(!idbP)idbP=new Promise((res,rej)=>{
-    try{const r=indexedDB.open('vigie',1);
-      r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('spin'))r.result.createObjectStore('spin');};
+    try{const r=indexedDB.open('vigie',2); // v2 (v0.15) : magasin « scan » pour la voiture scannée en 3D
+      r.onupgradeneeded=()=>{for(const n of ['spin','scan'])if(!r.result.objectStoreNames.contains(n))r.result.createObjectStore(n);};
       r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error('bloqué'));
     }catch(e){rej(e);}
   });
   idbP.catch(()=>{idbP=null;});
   return idbP;
 }
-function idbDo(mode,fn){return idb().then(db=>new Promise((res,rej)=>{const tx=db.transaction('spin',mode),req=fn(tx.objectStore('spin'));tx.oncomplete=()=>res(req&&req.result);tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error||new Error('abandon'));}));}
-const spinGet=()=>idbDo('readonly',s=>s.get('current'));
-const spinPut=rec=>idbDo('readwrite',s=>s.put(rec,'current'));
-const spinDelDb=()=>idbDo('readwrite',s=>s.delete('current'));
+function idbDo(store,mode,fn){return idb().then(db=>new Promise((res,rej)=>{const tx=db.transaction(store,mode),req=fn(tx.objectStore(store));tx.oncomplete=()=>res(req&&req.result);tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error||new Error('abandon'));}));}
+const spinGet=()=>idbDo('spin','readonly',s=>s.get('current'));
+const spinPut=rec=>idbDo('spin','readwrite',s=>s.put(rec,'current'));
+const spinDelDb=()=>idbDo('spin','readwrite',s=>s.delete('current'));
+const scanGet=()=>idbDo('scan','readonly',s=>s.get('current'));
+const scanPut=rec=>idbDo('scan','readwrite',s=>s.put(rec,'current'));
+const scanDelDb=()=>idbDo('scan','readwrite',s=>s.delete('current'));
 
 // Lecteur 360° : glisser du doigt, inertie, rotation lente quand on ne touche pas, indicateur d'angle
 function makeSpin(root,visible){
@@ -3331,14 +3340,20 @@ function spinSet(rec){
   SPIN.n=SPIN.urls.length;SPIN.date=rec?rec.date:null;SPIN.src=rec?rec.src:'';
   homeSpin.set(SPIN.urls);carSpin.set(SPIN.urls);
 }
+const dayLong=d=>new Date(d).toLocaleDateString('fr-FR',{day:'numeric',month:'long'});
+const spinDelLabel=()=>SCAN.rec?(SPIN.urls.length?'Supprimer le scan et la vue 360°':'Supprimer le scan'):'Supprimer la vue 360°';
 function spinUI(){
-  const has=SPIN.urls.length>0;
-  $('#spinPrev').hidden=!has;$('#spinEmpty').hidden=has;
+  const has=SPIN.urls.length>0,sc=!!SCAN.rec;
+  $('#spinPrev').hidden=!has;$('#spinEmpty').hidden=has||sc;
   const info=$('#spinInfo');info.hidden=!has;
-  if(has)info.textContent=`${SPIN.n} images${SPIN.src==='photos'?' tirées de tes photos':' tirées de ta vidéo'}${SPIN.date?`, le ${new Date(SPIN.date).toLocaleDateString('fr-FR',{day:'numeric',month:'long'})}`:''}. Glisse du doigt pour la faire tourner. Elle s'affiche sur l'accueil avec le bouton 360°.`;
-  $('#spinFilm').textContent=has?'Refilmer le tour':'Filmer le tour de ta voiture';
-  const del=$('#spinDel');del.hidden=!has;del.classList.remove('armed');del.textContent='Supprimer la vue 360°';
-  $$('#spinBtns button').forEach(b=>{b.disabled=SPIN.busy;});
+  if(has)info.textContent=`Vue 360° : ${SPIN.n} images${SPIN.src==='photos'?' tirées de tes photos':' tirées de ta vidéo'}${SPIN.date?`, le ${dayLong(SPIN.date)}`:''}. Glisse du doigt pour la faire tourner. Elle s'affiche sur l'accueil avec le bouton 360°.`;
+  const si=$('#scanInfo');si.hidden=!(sc||SCAN.note);
+  if(SCAN.note)si.textContent=SCAN.note;
+  else if(sc){const q=SCAN.rec.quality||{};si.textContent=`Modèle 3D : ta vraie voiture, scannée${SCAN.rec.date?` le ${dayLong(SCAN.rec.date)}`:''} à partir de ${q.views||'—'} images de ta vidéo et peinte avec ses propres couleurs. Les vitres et les creux sont lissés, le dessous n'est pas vu et la taille est estimée, pas mesurée.`;}
+  $('#scanSw').hidden=!sc;$('#scan-on').checked=SCAN.on;
+  $('#spinFilm').textContent=has||sc?'Refaire le scan':'Scanner ma voiture';
+  const del=$('#spinDel');del.hidden=!(has||sc);del.classList.remove('armed');del.textContent=spinDelLabel();
+  $$('#spinBtns button').forEach(b=>{b.disabled=SPIN.busy;});$('#scan-on').disabled=SPIN.busy;
   switchUI();
 }
 function spinErr(m){$('#spinErr').textContent=m||'';}
@@ -3417,18 +3432,50 @@ const SPIN_MSG={
   peu:'Choisis au moins 8 photos, prises en tournant autour de la voiture (36 au maximum).',
   photo:'Une des photos ne peut pas être lue. Choisis des photos en JPEG ou PNG.'
 };
+/* ---------- Scan 3D (v0.15) : la vidéo du tour → la vraie voiture en 3D (site/scan3d.js, calculé sur l'appareil) ----------
+   Le scan fournit aussi les 36 images de la vue 360°. S'il échoue (pas de voiture reconnue, vidéo trop courte, détourage
+   introuvable hors ligne), la vue 360° est faite quand même et la raison s'affiche sous la carte (pas en erreur). */
+function scanSet(rec){SCAN.rec=rec||null;window.VigieState.scanRec=SCAN.rec;window.VigieState.scanOn=!!SCAN.rec&&SCAN.on;try{update();}catch(e){}}
+const SCAN_STEPS={frames:['Lecture de la vidéo',0,.3],model:['Chargement du détourage',.3,.05],mask:['Détourage de ta voiture',.35,.35],pose:['Calcul de ton tour',.7,.1],carve:['Sculpture de la forme en 3D',.8,.1],paint:['Peinture avec tes images',.9,.1]};
+const SCAN_ORDER=Object.keys(SCAN_STEPS);
+function scanProg(stage,k){const s=SCAN_STEPS[stage];if(!s)return;spinProg(s[1]+s[2]*clamp(k,0,1),`Étape ${SCAN_ORDER.indexOf(stage)+1} sur ${SCAN_ORDER.length} · ${s[0]}…`);}
+const SCAN_WHY={
+  courte:'la vidéo dure moins de 6 secondes',
+  modele:'le détourage de la voiture n’a pas pu se charger (il faut le réseau la première fois)',
+  voiture:'Vigie n’a pas reconnu ta voiture sur assez d’images',
+  forme:'la forme trouvée est trop petite ou en morceaux',
+  autre:'le calcul n’a pas abouti sur cet appareil'
+};
 async function spinMake(kind,files){
   if(SPIN.busy||!files||!files.length)return;
-  SPIN.busy=true;window.VigieState.busy=true;spinErr('');spinUI();$('#spinProg').hidden=false;spinProg(0,kind==='video'?'Lecture de la vidéo…':'Lecture des photos…');
+  SPIN.busy=true;window.VigieState.busy=true;spinErr('');SCAN.note='';spinUI();$('#spinProg').hidden=false;spinProg(0,kind==='video'?'Lecture de la vidéo…':'Lecture des photos…');
   const t0=performance.now();
   try{
-    const r=kind==='video'?await framesFromVideo(files[0]):await framesFromPhotos(files);
+    let r,scan=null;
+    if(kind==='video'){
+      try{
+        const m=await import('./scan3d.js');
+        const sr=await m.scanVideo(files[0],{progress:scanProg});
+        r={frames:sr.spinFrames,w:sr.spinSize[0],h:sr.spinSize[1]};
+        delete sr.spinFrames;delete sr.spinSize;delete sr.debug;scan=sr;
+        SCAN.ms=Math.round(performance.now()-t0);
+      }catch(e){
+        const c=e&&e.message;
+        if(c==='lecture')throw e;
+        SCAN.note=`Le modèle 3D n’a pas pu être fait : ${SCAN_WHY[c]||SCAN_WHY.autre}. La vue 360° est prête. Pour la 3D, refilme un tour complet à environ 3 m, la voiture entière au milieu de l’écran.`;
+        if(e&&e.spinFrames&&e.spinFrames.length>=8)r={frames:e.spinFrames,w:e.spinSize[0],h:e.spinSize[1]};
+        else{spinProg(0,'Lecture de la vidéo…');r=await framesFromVideo(files[0]);}
+      }
+    }else r=await framesFromPhotos(files);
     const rec={v:1,frames:r.frames,w:r.w,h:r.h,date:new Date().toISOString(),src:kind==='video'?'video':'photos'};
     let kept=true;try{await spinPut(rec);}catch(e){kept=false;}
+    if(scan){try{await scanPut(scan);}catch(e){kept=false;}}
     SPIN.ms=Math.round(performance.now()-t0);
-    spinSet(rec);setStageView('spin');
-    if(kept)toast(`Vue 360° prête · ${rec.frames.length} images`);
-    else spinErr('Cet appareil n’a pas pu garder la vue 360° (stockage plein ou bloqué) : elle disparaîtra à la fermeture de Vigie.');
+    spinSet(rec);
+    if(scan){SCAN.on=true;try{localStorage.setItem('vigie.scan3d','1');}catch(e){}scanSet(scan);setStageView('3d');}
+    else setStageView('spin');
+    if(kept)toast(scan?'Ta voiture en 3D est prête':`Vue 360° prête · ${rec.frames.length} images`);
+    else spinErr(`Cet appareil n’a pas pu garder ${scan?'ta voiture en 3D':'la vue 360°'} (stockage plein ou bloqué) : elle disparaîtra à la fermeture de Vigie.`);
   }catch(e){
     spinErr(SPIN_MSG[e&&e.message]||'La vue 360° n’a pas pu être préparée. Réessaie, ou choisis 8 à 36 photos prises en tournant autour de la voiture.');
   }finally{SPIN.busy=false;window.VigieState.busy=false;$('#spinProg').hidden=true;spinUI();}
@@ -3440,13 +3487,23 @@ $('#spinPhotos').addEventListener('click',()=>{spinErr('');$('#spinPics').click(
 $('#spinPics').addEventListener('change',e=>{const f=e.target.files;if(f&&f.length)spinMake('photos',[...f]);e.target.value='';});
 $('#spinDel').addEventListener('click',async()=>{
   const b=$('#spinDel');
-  if(!b.classList.contains('armed')){b.classList.add('armed');b.textContent='Confirmer';clearTimeout(b._t);b._t=setTimeout(()=>{b.classList.remove('armed');b.textContent='Supprimer la vue 360°';},4000);return;}
+  if(!b.classList.contains('armed')){b.classList.add('armed');b.textContent='Confirmer';clearTimeout(b._t);b._t=setTimeout(()=>{b.classList.remove('armed');b.textContent=spinDelLabel();},4000);return;}
+  const sc=!!SCAN.rec;
   try{await spinDelDb();}catch(e){}
-  spinSet(null);if(viewPref==='spin')setStageView(PHOTO?'photo':'3d');spinUI();toast('Vue 360° supprimée');
+  try{await scanDelDb();}catch(e){}
+  SCAN.note='';spinSet(null);scanSet(null);if(viewPref==='spin')setStageView(PHOTO?'photo':'3d');spinUI();toast(sc?'Scan supprimé : le dessin Vigie revient':'Vue 360° supprimée');
 });
-window.VigieSpin={state:()=>({n:SPIN.n,busy:SPIN.busy,ms:SPIN.ms,view:stageView,loaded:SPIN.loaded,src:SPIN.src}),homeAngle:()=>homeSpin.angle(),homeFrame:()=>homeSpin.frame()};
+$('#scan-on').addEventListener('change',e=>{
+  SCAN.on=e.target.checked;try{localStorage.setItem('vigie.scan3d',SCAN.on?'1':'0');}catch(err){}
+  scanSet(SCAN.rec);spinUI();toast(SCAN.on?'Ta voiture scannée remplace le dessin Vigie':'Le dessin Vigie revient');
+});
+window.VigieSpin={state:()=>({n:SPIN.n,busy:SPIN.busy,ms:SPIN.ms,view:stageView,loaded:SPIN.loaded,src:SPIN.src,scan:!!SCAN.rec,scanOn:SCAN.on,scanMs:SCAN.ms,scanNote:SCAN.note,scanQ:SCAN.rec&&SCAN.rec.quality,scanDims:SCAN.rec&&SCAN.rec.dims}),homeAngle:()=>homeSpin.angle(),homeFrame:()=>homeSpin.frame()};
 spinUI();
-spinGet().then(rec=>{if(rec&&Array.isArray(rec.frames)&&rec.frames.length>=8)spinSet(rec);}).catch(()=>{}).then(()=>{SPIN.loaded=true;spinUI();setStageView(viewPref,false);});
+// Au démarrage : la vue 360° et le scan 3D viennent d'IndexedDB (un peu après l'affichage de l'appli)
+Promise.all([spinGet().catch(()=>null),scanGet().catch(()=>null)]).then(([rec,sc])=>{
+  if(rec&&Array.isArray(rec.frames)&&rec.frames.length>=8)spinSet(rec);
+  if(sc&&sc.field&&sc.atlas&&sc.views)scanSet(sc);
+}).catch(()=>{}).then(()=>{SPIN.loaded=true;spinUI();setStageView(viewPref,false);});
 
 /* ---------- Raccourcis de l'accueil ---------- */
 $('#qaFuel').addEventListener('click',()=>{go('drive');setTimeout(()=>fuelOpen(null),reduce?0:450);});
@@ -3624,7 +3681,10 @@ const BODY={
 };
 let T=BODY.citadine,WR=.32,AR=.43,HALF=.90,WZ=.75;
 const WHEELS={fl:[0,0],fr:[0,0],rl:[0,0],rr:[0,0]};
-function useBody(k){T=BODY[k]||BODY.citadine;WR=T.WR;AR=WR+.11;HALF=T.half;WZ=HALF-.15;WHEELS.fl=[T.wf,-WZ];WHEELS.fr=[T.wf,WZ];WHEELS.rl=[T.wr,-WZ];WHEELS.rr=[T.wr,WZ];}
+function useT(t){T=t;WR=T.WR;AR=WR+.11;HALF=T.half;WZ=HALF-.15;WHEELS.fl=[T.wf,-WZ];WHEELS.fr=[T.wf,WZ];WHEELS.rl=[T.wr,-WZ];WHEELS.rr=[T.wr,WZ];}
+function useBody(k){useT(BODY[k]||BODY.citadine);}
+// Voiture scannée : mêmes repères que les dessins (longueur, largeur, hauteur) pour le cadrage, l'ombre et les anneaux de pneus
+function useDims(d){const L=cl(d.L,2.5,7),W=cl(d.W,1.2,2.6),H=cl(d.H,1,2.8);useT(Object.assign({},BODY.citadine,{F:L/2,R:-L/2,half:W/2,roof:H,wf:L*.31,wr:-L*.31,WR:.32}));}
 useBody('citadine');
 function bodyShape(){
   const {F,R,b,wf,wr,belt,beltR,hoodX,noseY}=T;
@@ -3942,8 +4002,32 @@ function runApp(){
   const cam=new THREE.PerspectiveCamera(30,1,.1,100);
   const table=new THREE.Group();scene.add(table);
   let car=null,mirror=null,mirrorPaint=[],glows=[],gr=null,curKey='',paint=S().paint;
-  const keyOf=s=>(s.body||'citadine')+(s.ev?'-ev':'');
   const disposeTree=o=>o.traverse(x=>{if(x.geometry)x.geometry.dispose();if(x.material)x.material.dispose();});
+  // Voiture scannée (v0.15) : préparée en arrière-plan (maillage + peinture), le dessin Vigie reste affiché d'ici là
+  const SC={pending:'',failed:'',ready:null};
+  let scanMods=null;
+  const scanWanted=s=>s.scanOn&&s.scanRec&&s.scanRec.date?'scan:'+s.scanRec.date:'';
+  const scanTexDispose=o=>{const u=o&&o.material&&o.material.uniforms;if(u){if(u.uTex.value)u.uTex.value.dispose();if(u.uMask.value)u.uMask.value.dispose();}};
+  function scanPrep(k,rec){
+    if(SC.pending===k||SC.failed===k||(SC.ready&&SC.ready.key===k))return;
+    SC.pending=k;window.VigieState.scan3d={state:'prépa'};
+    if(!scanMods)scanMods=Promise.all([import('three/addons/objects/MarchingCubes.js'),import('./scan3d.js')]);
+    scanMods.then(([mc,sc])=>sc.buildScanObject(THREE,mc.MarchingCubes,rec)).then(o=>{
+      if(SC.pending!==k){disposeTree(o.group);scanTexDispose(o);return;}
+      if(SC.ready){disposeTree(SC.ready.obj.group);scanTexDispose(SC.ready.obj);}
+      SC.ready={key:k,obj:o};SC.pending='';
+    },e=>{scanMods=null;if(SC.pending===k){SC.pending='';SC.failed=k;}window.VigieState.scan3d={state:'échec',err:String(e&&e.message||e).slice(0,200)};});
+  }
+  function keyOf(s){
+    const w=scanWanted(s);
+    if(w){
+      if(car&&car.scanKey===w)return w;
+      if(SC.ready&&SC.ready.key===w)return w;
+      scanPrep(w,s.scanRec);
+      if(car&&car.scanKey&&SC.pending===w)return curKey; // l'ancien scan reste affiché pendant la préparation du nouveau
+    }
+    return (s.body||'citadine')+(s.ev?'-ev':'');
+  }
   // Appareil lent (v0.13) : on mesure les 20 premières images ; au-delà de 40 ms, résolution 1 puis 0,75, puis sans reflet ni particules
   const perf={prev:0,n:0,sum:0,level:0,done:false};
   function perfStep(now){
@@ -3959,14 +4043,27 @@ function runApp(){
     if(perf.level>=2){if(mirror)mirror.visible=false;pts.visible=false;perf.done=true;}
   }
   function mount(){
-    const s=S();curKey=keyOf(s);useBody(s.body);paint=s.paint;
-    if(car){table.remove(car.group);table.remove(mirror);disposeTree(car.group);disposeTree(mirror);}
-    car=buildCar({paint:s.paint,ev:s.ev});table.add(car.group);
+    const s=S();curKey=keyOf(s);paint=s.paint;
+    if(car){table.remove(car.group);table.remove(mirror);disposeTree(car.group);disposeTree(mirror);if(car.scan)scanTexDispose(car.scan);}
+    if(curKey.startsWith('scan:')&&SC.ready&&SC.ready.key===curKey){
+      const o=SC.ready.obj;SC.ready=null;useDims(o.dims);
+      // Pas de peinture ni de feux dessinés : la couleur vient des images. Matériaux factices pour le reste de la scène.
+      car={group:o.group,scan:o,scanKey:curKey,mats:{paint:new THREE.MeshBasicMaterial(),cal:new THREE.MeshBasicMaterial()}};
+      window.VigieState.scan3d={state:'affichée',triangles:Math.round(o.triangles),dims:o.dims};
+      if(perf.level<2){perf.done=false;perf.n=0;perf.sum=0;} // la peinture par projection coûte plus : on remesure
+    }else{
+      if(curKey.startsWith('scan:'))curKey=(s.body||'citadine')+(s.ev?'-ev':'');
+      useBody(s.body);car=buildCar({paint:s.paint,ev:s.ev});
+      if(window.VigieState.scan3d&&window.VigieState.scan3d.state==='affichée')window.VigieState.scan3d={state:'dessin'};
+    }
+    table.add(car.group);
     // Reflet au sol (copie inversée, transparente)
     mirror=car.group.clone(true);mirror.scale.y=-1;mirrorPaint=[];
-    mirror.traverse(o=>{if(o.isMesh){const isPaint=o.material===car.mats.paint;o.material=o.material.clone();o.material.transparent=true;o.material.opacity=.16;o.material.depthWrite=false;o.material.side=THREE.DoubleSide;if(isPaint)mirrorPaint.push(o.material);}});
+    mirror.traverse(o=>{if(o.isMesh){const src=o.material,isPaint=src===car.mats.paint;o.material=src.clone();
+      if(src.uniforms&&src.uniforms.uOpacity){const u=o.material.uniforms;u.uTex.value=src.uniforms.uTex.value;u.uMask.value=src.uniforms.uMask.value;u.uOpacity.value=.16;}
+      o.material.transparent=true;o.material.opacity=.16;o.material.depthWrite=false;o.material.side=THREE.DoubleSide;if(isPaint)mirrorPaint.push(o.material);}});
     table.add(mirror);if(perf.level>=2)mirror.visible=false;
-    glows=addGlows(car,.9);
+    glows=car.scan?[]:addGlows(car,.9);
     if(!gr)gr=addGround(scene,car);else{const fx=carFx(car);gr.lows=fx.lows;gr.under=fx.under;}
     accCur='';
   }

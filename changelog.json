@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.15",
+      "date": "18 nov. 2026",
+      "items": [
+        "Ta vraie voiture en 3D : filme-en le tour, Vigie la scanne, la refait en 3D et la peint avec ses propres couleurs",
+        "Elle remplace le dessin Vigie sur l'accueil, dans Santé, au Garage et en mode autoradio (un interrupteur ramène le dessin)",
+        "Tout se calcule sur ton téléphone : ni la vidéo ni le modèle 3D ne sont envoyés, aucun fichier à exporter"
+      ]
+    },
+    {
       "version": "0.14",
       "date": "18 nov. 2026",
       "items": [

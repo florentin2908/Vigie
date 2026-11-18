@@ -32,6 +32,10 @@ Ce que fait le script :
 - (v0.14) vue 360° réelle : fabrique 10 photos puis une vidéo ffmpeg testsrc de 30 s en .mp4 H.264, les donne au Garage,
   vérifie l'extraction (36 images JPEG de 960 px dans IndexedDB, durée), l'affichage 360° de l'accueil, la rotation au glisser,
   la rotation lente quand on ne touche pas, et la conservation après rechargement ;
+- (v0.15) scan 3D : la vidéo testsrc (sans voiture) doit donner la vue 360° avec une explication calme (pas une erreur) ;
+  puis une vidéo de synthèse d'une voiture filmée en tournant (outils/video-de-test.py, 150 images) doit donner la voiture
+  en 3D : proportions proches de la vraie, gardée dans IndexedDB (magasin « scan »), affichée sur l'accueil, dans Santé
+  et au Garage à la place du dessin, interrupteur « Montrer ma voiture scannée », et toujours là après rechargement ;
 - écrit report.json et contact.jpg (planche de captures à regarder une fois).
 Code de sortie 1 s'il y a une erreur JavaScript.
 """
@@ -87,6 +91,7 @@ def on_console(m):
     if m.type != 'error': return
     t = m.text
     if 'Failed to load resource' in t or 'net::ERR' in t: return
+    if t.startswith('INFO:'): return  # MediaPipe (détourage du scan 3D) écrit ses messages d'information dans console.error
     errors.append('console: ' + t[:400])
 
 OVERFLOW_JS = """() => {
@@ -117,6 +122,7 @@ INTRO_STATS = """() => { const m = window.__vm || {f: []}, f = m.f.filter(t => t
 intro = {}
 rendu = {}
 vue360 = {}
+scan_3d = {}
 
 async def honesty(pg):
     try:
@@ -346,12 +352,16 @@ async def spin360(pg):
         st = await pg.evaluate("() => Object.assign(window.VigieSpin.state(), {err: document.querySelector('#spinErr').textContent})")
         db = await pg.evaluate(IDB_JS)
         vue360.update({'extraction_s': secs, 'extraction_ms_appli': st['ms'], 'images': st['n'], 'stockage': db})
+        vue360['scan_sans_voiture'] = {'modele_3d': st['scan'], 'explication': st['scanNote']}
         if st['err']: errors.append('contrôle : vue 360° refusée : ' + st['err'])
+        if st['scan'] or 'reconnu ta voiture' not in (st['scanNote'] or ''):
+            errors.append(f"contrôle : une vidéo sans voiture doit donner la vue 360° et expliquer que la voiture n'est pas reconnue ({st['scanNote']!r})")
         if st['n'] != 36: errors.append(f"contrôle : {st['n']} image(s) tirée(s) de la vidéo au lieu de 36")
         if not db or db['n'] != 36 or db['w'] != 960 or db['type'] != 'image/jpeg' or db['src'] != 'video':
             errors.append(f'contrôle : la vue 360° n\'est pas gardée comme prévu dans IndexedDB : {db}')
         elif db['tailles'] < 30: errors.append('contrôle : les images de la vue 360° se ressemblent trop (extraction figée ?)')
-        if st['ms'] and st['ms'] > 15000: errors.append(f"contrôle : extraction de la vue 360° en {st['ms'] / 1000:.1f} s (objectif : moins de 15 s)")
+        # v0.15 : la vidéo passe d'abord par le scan 3D (arrêté au premier tiers faute de voiture), puis donne la vue 360°
+        if st['ms'] and st['ms'] > 40000: errors.append(f"contrôle : vue 360° d'une vidéo sans voiture en {st['ms'] / 1000:.1f} s (objectif : moins de 40 s)")
         await pg.evaluate("document.querySelector('#spinCard').scrollIntoView({block: 'center'})"); await pg.wait_for_timeout(800)
         await snap(pg, 'tel_garage_360')
         await goto_tab(pg, 'home'); await pg.evaluate("document.querySelector('#main').scrollTo(0, 0)"); await pg.wait_for_timeout(1000)
@@ -376,6 +386,70 @@ async def spin360(pg):
         await snap(pg, 'tel_accueil_360_tourne')
     except Exception as e:
         errors.append('contrôle : vue 360° bloquée : ' + str(e).splitlines()[0][:140])
+
+SCAN_IDB_JS = """() => new Promise(r => {
+  const q = indexedDB.open('vigie');
+  q.onsuccess = () => { try { const g = q.result.transaction('scan').objectStore('scan').get('current');
+    g.onsuccess = () => { const v = g.result; q.result.close(); r(v ? {n: v.n, champ: v.field && v.field.length, vues: v.views && v.views.length, atlas: v.atlas && v.atlas.type, atlas_ko: v.atlas && Math.round(v.atlas.size / 1024), masques: v.maskAtlas && v.maskAtlas.type, dims: v.dims} : null); };
+    g.onerror = () => r(null); } catch (e) { r(null); } };
+  q.onerror = () => r(null);
+})"""
+SCAN_STATE = "() => (window.VigieState.scan3d || {}).state || ''"
+
+async def red_share(pg, sel):
+    # La voiture de la vidéo de test est rouge ; le dessin Vigie (Blanc nacré) ne l'est pas
+    p = os.path.join(OUT, 'zone.png'); await pg.locator(sel).screenshot(path=p)
+    im = Image.open(p).convert('RGB').resize((160, 120)); px = list(im.getdata())
+    return round(sum(1 for r, g, b in px if r > 140 and g < 90 and b < 90 and r > g * 1.8) / len(px) * 100, 1)
+
+async def scan3d(pg):
+    gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'video-de-test.py'); d = os.path.join(OUT, 'scan')
+    try:
+        subprocess.run([sys.executable, gen, d, '--deps', DEPS, '--images', '150'], check=True, timeout=900, capture_output=True)
+        truth = json.load(open(os.path.join(d, 'tour-synthetique.json'), encoding='utf-8'))['dims']
+    except Exception as e:
+        errors.append('contrôle : scan 3D non testé, la vidéo de test n\'a pas pu être fabriquée : ' + str(e).splitlines()[0][:120]); return
+    try:
+        await goto_tab(pg, 'car')
+        t0 = time.time()
+        await pg.set_input_files('#spinVid', os.path.join(d, 'tour-synthetique.mp4'))
+        await pg.wait_for_function("window.VigieSpin && !window.VigieSpin.state().busy && (window.VigieSpin.state().scan || window.VigieSpin.state().scanNote || document.querySelector('#spinErr').textContent)", timeout=300000)
+        st = await pg.evaluate("() => Object.assign(window.VigieSpin.state(), {err: document.querySelector('#spinErr').textContent})")
+        db = await pg.evaluate(SCAN_IDB_JS)
+        scan_3d.update({'duree_s': round(time.time() - t0, 1), 'duree_ms_appli': st['scanMs'], 'qualite': st['scanQ'], 'stockage': db, 'vraies_dimensions': truth})
+        if st['err']: errors.append('contrôle : scan 3D refusé : ' + st['err'])
+        if not st['scan']: errors.append('contrôle : pas de voiture en 3D après la vidéo de test : ' + (st['scanNote'] or '?')); return
+        dm = st['scanDims']; q = st['scanQ'] or {}
+        lh, wh, tlh, twh = dm['L'] / dm['H'], dm['W'] / dm['H'], truth['L'] / truth['H'], truth['W'] / truth['H']
+        scan_3d['proportions'] = {'longueur_sur_hauteur': [round(lh, 2), round(tlh, 2)], 'largeur_sur_hauteur': [round(wh, 2), round(twh, 2)]}
+        if abs(lh / tlh - 1) > .15 or abs(wh / twh - 1) > .2:
+            errors.append(f"contrôle : la voiture scannée n'a pas les bonnes proportions (L/H {lh:.2f} au lieu de {tlh:.2f}, l/H {wh:.2f} au lieu de {twh:.2f})")
+        if q.get('carFrames', 0) < 60: errors.append(f"contrôle : voiture reconnue sur {q.get('carFrames')} images sur 72 seulement")
+        if not db or db['champ'] != 96 ** 3 or db['vues'] != 36 * 12 or db['atlas'] != 'image/jpeg' or db['masques'] != 'image/png' or db['atlas_ko'] < 100:
+            errors.append(f'contrôle : le scan 3D n\'est pas gardé comme prévu dans IndexedDB : {db}')
+        if st['scanMs'] and st['scanMs'] > 120000: errors.append(f"contrôle : scan 3D en {st['scanMs'] / 1000:.0f} s (objectif : moins de 2 min en rendu logiciel)")
+        await pg.evaluate("document.querySelector('#spinCard').scrollIntoView({block: 'center'})"); await pg.wait_for_timeout(800)
+        await snap(pg, 'tel_garage_scan3d')
+        for tab, name in [('home', 'accueil'), ('sante', 'sante'), ('car', 'garage')]:
+            await goto_tab(pg, tab); await pg.evaluate("document.querySelector('#main').scrollTo(0, 0)")
+            try: await pg.wait_for_function(SCAN_STATE + " === 'affichée'", timeout=40000)
+            except Exception: errors.append(f'contrôle : la voiture scannée ne s\'affiche pas [{tab}] ({await pg.evaluate(SCAN_STATE)})'); continue
+            await pg.wait_for_timeout(2500)
+            if tab == 'home':
+                rs = await red_share(pg, '#homeStage'); scan_3d['rouge_accueil_pct'] = rs
+                if rs < 3: errors.append(f'contrôle : la voiture scannée (rouge) est à peine visible sur l\'accueil ({rs} % de rouge)')
+            await snap(pg, f'tel_scan3d_{name}')
+        await pg.click('#scanSw label.switch', force=True)
+        try:
+            await pg.wait_for_function(SCAN_STATE + " === 'dessin'", timeout=20000)
+            await pg.wait_for_timeout(1500); rs = await red_share(pg, '.car-cards .cstage')
+            if rs > 1: errors.append(f'contrôle : la voiture scannée reste affichée après l\'avoir masquée ({rs} % de rouge)')
+        except Exception: errors.append('contrôle : « Montrer ma voiture scannée en 3D » ne ramène pas le dessin Vigie')
+        await pg.click('#scanSw label.switch', force=True)
+        try: await pg.wait_for_function(SCAN_STATE + " === 'affichée'", timeout=40000)
+        except Exception: errors.append('contrôle : la voiture scannée ne revient pas quand on la remontre')
+    except Exception as e:
+        errors.append('contrôle : scan 3D bloqué : ' + str(e).splitlines()[0][:140])
 
 RADIO_JS = """() => {
   const r = document.querySelector('#radio'); if (!r) return {open: false};
@@ -489,6 +563,12 @@ async def persistence(pg):
         sp = await pg.evaluate("() => ({n: window.VigieSpin.state().n, view: localStorage.getItem('vigie.view'), spin: document.querySelector('#homeStage').classList.contains('is360')})")
         if sp['n'] != 36: errors.append(f"contrôle : la vue 360° est perdue après rechargement ({sp['n']} images)")
         if sp['view'] == 'spin' and not sp['spin']: errors.append('contrôle : l\'accueil ne revient pas en vue 360° après rechargement')
+        if not await pg.evaluate("window.VigieSpin.state().scan"): errors.append('contrôle : le scan 3D est perdu après rechargement')
+        else:
+            await goto_tab(pg, 'car')  # l'accueil peut être resté en Photo ou 360° après le test de fumée
+            try: await pg.wait_for_function(SCAN_STATE + " === 'affichée'", timeout=40000)
+            except Exception: errors.append(f'contrôle : la voiture scannée ne s\'affiche plus après rechargement ({await pg.evaluate(SCAN_STATE)})')
+            await snap(pg, 'tel_scan3d_apres_rechargement')
     except Exception as e:
         errors.append('contrôle : vue 360° pas rechargée : ' + str(e).splitlines()[0][:120])
 
@@ -521,6 +601,7 @@ async def main():
         await demo_scenarios(pg)
         await carnet(pg)
         await spin360(pg)
+        await scan3d(pg)
         T = await tabs(pg)
         for tab in T:
             await goto_tab(pg, tab)
@@ -555,7 +636,7 @@ async def main():
     sheet = Image.new('RGB', (cw * cols, ch * rows), 'white')
     for i, im in enumerate(ims): sheet.paste(im, ((i % cols) * cw, (i // cols) * ch))
     sheet.save(os.path.join(OUT, 'contact.jpg'), quality=82)
-    rep = {'demarrage_s': start_s, 'lancement': intro, 'rendu_3d': rendu, 'vue_360': vue360, 'rubriques': T, 'erreurs': errors, 'debordements': overflow, 'boutons_testes': len(clicked), 'clics': clicked, 'captures': shots}
+    rep = {'demarrage_s': start_s, 'lancement': intro, 'rendu_3d': rendu, 'vue_360': vue360, 'scan_3d': scan_3d, 'rubriques': T, 'erreurs': errors, 'debordements': overflow, 'boutons_testes': len(clicked), 'clics': clicked, 'captures': shots}
     json.dump(rep, open(os.path.join(OUT, 'report.json'), 'w'), ensure_ascii=False, indent=1)
     print(f'Rubriques : {T}')
     print(f'Démarrage terminé en {start_s} s · {len(clicked)} boutons cliqués')
