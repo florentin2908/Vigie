@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.20",
+      "date": "19 nov. 2026",
+      "items": [
+        "Scan 3D bien plus précis : pour chaque image, Vigie retrouve exactement où était ton téléphone (position, hauteur, visée, inclinaison) en suivant des milliers de petits détails d'une image à l'autre, comme un logiciel de photogrammétrie, mais sur ton téléphone",
+        "Résultat sur la vidéo de test : angles 6 fois plus justes, proportions de la voiture à 1 à 3 % près, peinture plus nette",
+        "Tu peux aussi scanner avec des photos : 40 ou plus, prises en tournant, une à chaque pas, à la même hauteur. Dès 16 photos, Vigie tente la 3D ; une vidéo reste le plus sûr",
+        "Le champ de l'appareil est lu dans tes photos quand il y est indiqué (grand-angle compris)",
+        "Vigie vérifie ce calage avec les silhouettes de ta voiture et garde la méthode précédente quand il n'est pas assez sûr"
+      ]
+    },
+    {
       "version": "0.19",
       "date": "18 nov. 2026",
       "items": [

@@ -19,7 +19,7 @@ Pour l'installer :
 
 ## Ta voiture en 3D
 
-Garage > Ta voiture en 3D > « Scanner ma voiture » : un tour complet en 20 à 30 secondes, à pas lents et réguliers, téléphone à l'horizontale à hauteur des phares, à environ 3 m (la voiture reste entière et au milieu de l'écran), de jour. Vigie reconnaît la voiture sur chaque image, retrouve où était le téléphone, sculpte sa forme en 3D, repère les roues et les vitres, puis la peint en haute définition avec tes images (sans les reflets du décor : le vernis brille en temps réel). Tout se calcule sur le téléphone, sans fichier à exporter ni autre appli. Un interrupteur ramène le dessin Vigie.
+Garage > Ta voiture en 3D > « Scanner ma voiture » : un tour complet en 20 à 30 secondes, à pas lents et réguliers, téléphone à l'horizontale à hauteur des phares, à environ 3 m (la voiture reste entière et au milieu de l'écran), de jour. Vigie reconnaît la voiture sur chaque image, retrouve où était le téléphone (en suivant des milliers de petits détails d'une image à l'autre), sculpte sa forme en 3D, repère les roues et les vitres, puis la peint en haute définition avec tes images (sans les reflets du décor : le vernis brille en temps réel). Tout se calcule sur le téléphone, sans fichier à exporter ni autre appli. Avec 16 photos ou plus prises en tournant (40 ou plus conseillées, à la même hauteur), Vigie tente aussi la 3D. Un interrupteur ramène le dessin Vigie.
 
 Tu as aussi la vue 360° (36 images) : sur l'accueil, choisis « 360° » et fais-la tourner du doigt. Avec 8 à 36 photos prises en tournant, Vigie fait seulement la vue 360°.
 

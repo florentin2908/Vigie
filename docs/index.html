@@ -1791,7 +1791,7 @@ body.radio-on .shell{visibility:hidden}
           <li>Téléphone à l'horizontale, à hauteur des phares.</li>
           <li>À environ 3 m de la voiture : elle reste entière et au milieu de l'écran.</li>
           <li>De jour, sans autre voiture collée à la tienne.</li>
-          <li>Avec des photos, Vigie fait seulement la vue 360°.</li>
+          <li>Avec des photos : 40 ou plus, une à chaque pas, toutes à la même hauteur. Dès 16 photos, Vigie tente aussi la 3D ; une vidéo reste le plus sûr.</li>
         </ul>
       </div>
       <p class="note" id="spinInfo" hidden>—</p>
@@ -1805,7 +1805,7 @@ body.radio-on .shell{visibility:hidden}
       <div class="btnrow" id="spinBtns">
         <button class="btn" id="spinFilm" type="button">Scanner ma voiture</button>
         <button class="btn ghost" id="spinPick" type="button">Choisir une vidéo</button>
-        <button class="btn ghost" id="spinPhotos" type="button">Choisir 8 à 36 photos</button>
+        <button class="btn ghost" id="spinPhotos" type="button">Choisir des photos</button>
         <button class="btn ghost danger" id="spinDel" type="button" hidden>Supprimer</button>
       </div>
     </div>
@@ -3236,7 +3236,7 @@ function startActions(){if(QS.get('add')==='1'&&!RADIO.on){go('drive');setTimeou
 let PHOTO=null,stageView='3d',viewPref='3d';
 try{const p=localStorage.getItem('vigie.photo');if(p&&p.startsWith('data:image/'))PHOTO=p;const v=localStorage.getItem('vigie.view');viewPref=v==='photo'||v==='spin'?v:'3d';}catch(e){}
 const SPIN={urls:[],imgs:[],n:0,date:null,src:'',busy:false,ms:null,loaded:false};
-const SCAN={rec:null,on:true,ms:null,note:''}; // voiture scannée en 3D (v0.15)
+const SCAN={rec:null,on:true,ms:null,note:"",kind:""}; // voiture scannée en 3D (v0.15) ; kind : vidéo ou photos (v0.20)
 try{SCAN.on=localStorage.getItem('vigie.scan3d')!=='0';}catch(e){}
 function setStageView(v,persist){
   stageView=v==='photo'&&PHOTO?'photo':v==='spin'&&SPIN.urls.length?'spin':'3d';
@@ -3425,8 +3425,9 @@ function loadPic(file){
 }
 function loadPicImg(file){return new Promise((res,rej)=>{const u=URL.createObjectURL(file),im=new Image();im.onload=()=>{URL.revokeObjectURL(u);res(im);};im.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('photo'));};im.src=u;});}
 // 8 à 36 photos prises en tournant → même affichage (dans l'ordre des noms de fichiers, comme l'appareil photo les numérote)
+const photoList=files=>[...files].filter(f=>/^image\//.test(f.type||'')).sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true})||a.lastModified-b.lastModified);
 async function framesFromPhotos(files){
-  let list=[...files].filter(f=>/^image\//.test(f.type||'')).sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true})||a.lastModified-b.lastModified);
+  let list=photoList(files);
   if(list.length<8)throw new Error('peu');
   if(list.length>SPIN_N){const k=list.length/SPIN_N;list=Array.from({length:SPIN_N},(_,i)=>list[Math.floor(i*k)]);}
   let W=0,H=0,c=null,g=null;const out=[];
@@ -3442,27 +3443,28 @@ async function framesFromPhotos(files){
 const SPIN_MSG={
   lecture:'Ce navigateur ne lit pas cette vidéo (souvent une vidéo .mov en HEVC, le format « haute efficacité » de l’iPhone). Refilme avec le bouton « Filmer le tour de ta voiture », ou choisis plutôt 8 à 36 photos prises en tournant autour de la voiture.',
   courte:'La vidéo est trop courte. Filme un tour complet de la voiture, en 20 à 30 secondes.',
-  peu:'Choisis au moins 8 photos, prises en tournant autour de la voiture (36 au maximum).',
+  peu:'Choisis au moins 8 photos prises en tournant autour de la voiture (16 ou plus pour la 3D).',
   photo:'Une des photos ne peut pas être lue. Choisis des photos en JPEG ou PNG.'
 };
 /* ---------- Scan 3D (v0.15) : la vidéo du tour → la vraie voiture en 3D (site/scan3d.js, calculé sur l'appareil) ----------
    Le scan fournit aussi les 36 images de la vue 360°. S'il échoue (pas de voiture reconnue, vidéo trop courte, détourage
    introuvable hors ligne), la vue 360° est faite quand même et la raison s'affiche sous la carte (pas en erreur). */
 function scanSet(rec){SCAN.rec=rec||null;window.VigieState.scanRec=SCAN.rec;window.VigieState.scanOn=!!SCAN.rec&&SCAN.on;document.body.classList.toggle('has-scan',window.VigieState.scanOn);try{update();}catch(e){}}
-const SCAN_STEPS={frames:['Lecture de la vidéo',0,.3],model:['Chargement du détourage',.3,.05],mask:['Détourage de ta voiture',.35,.35],pose:['Calcul de ton tour',.7,.1],carve:['Sculpture de la forme en 3D',.8,.1],paint:['Peinture avec tes images',.9,.1]};
+const SCAN_STEPS={frames:['Lecture de la vidéo',0,.2],model:['Chargement du détourage',.2,.03],mask:['Détourage de ta voiture',.23,.27],pose:['Calcul de ton tour',.5,.03],carve:['Calage de la caméra et sculpture en 3D',.53,.22],paint:['Peinture avec tes images',.75,.25]};
 const SCAN_ORDER=Object.keys(SCAN_STEPS);
-function scanProg(stage,k){const s=SCAN_STEPS[stage];if(!s)return;spinProg(s[1]+s[2]*clamp(k,0,1),`Étape ${SCAN_ORDER.indexOf(stage)+1} sur ${SCAN_ORDER.length} · ${s[0]}…`);}
+function scanProg(stage,k){const s=SCAN_STEPS[stage];if(!s)return;spinProg(s[1]+s[2]*clamp(k,0,1),`Étape ${SCAN_ORDER.indexOf(stage)+1} sur ${SCAN_ORDER.length} · ${stage==='frames'&&SCAN.kind==='photos'?'Lecture des photos':s[0]}…`);}
 const SCAN_WHY={
   courte:'la vidéo dure moins de 6 secondes',
   modele:'le détourage de la voiture n’a pas pu se charger (il faut le réseau la première fois)',
   modelePage:'cette page ne permet pas de charger le détourage de la voiture : ouvre Vigie depuis son site (florentin2908.github.io/Vigie) pour le scan 3D',
   voiture:'Vigie n’a pas reconnu ta voiture sur assez d’images',
   forme:'la forme trouvée est trop petite ou en morceaux',
-  autre:'le calcul n’a pas abouti sur cet appareil'
+  autre:'le calcul n’a pas abouti sur cet appareil',
+  peu:'il faut au moins 16 photos lisibles, prises en tournant autour de la voiture'
 };
 async function spinMake(kind,files){
   if(SPIN.busy||!files||!files.length)return;
-  SPIN.busy=true;window.VigieState.busy=true;spinErr('');SCAN.note='';spinUI();$('#spinProg').hidden=false;spinProg(0,kind==='video'?'Lecture de la vidéo…':'Lecture des photos…');
+  SPIN.busy=true;window.VigieState.busy=true;spinErr('');SCAN.note='';SCAN.kind=kind;spinUI();$('#spinProg').hidden=false;spinProg(0,kind==='video'?'Lecture de la vidéo…':'Lecture des photos…');
   const t0=performance.now();
   try{
     let r,scan=null;
@@ -3481,7 +3483,25 @@ async function spinMake(kind,files){
         if(e&&e.spinFrames&&e.spinFrames.length>=8)r={frames:e.spinFrames,w:e.spinSize[0],h:e.spinSize[1]};
         else{spinProg(0,'Lecture de la vidéo…');r=await framesFromVideo(files[0]);}
       }
-    }else r=await framesFromPhotos(files);
+    }else{
+      // v0.20 : à partir de 16 photos prises en tournant, Vigie tente aussi la 3D (même calcul qu'avec une vidéo)
+      let list=photoList(files);if(list.length>72){const k=list.length/72;list=Array.from({length:72},(_,i)=>list[Math.floor(i*k)]);}
+      if(list.length>=16){
+        try{
+          const m=await import('./scan3d.js');
+          const sr=await m.scanPhotos(list,{progress:scanProg});
+          r={frames:sr.spinFrames,w:sr.spinSize[0],h:sr.spinSize[1]};
+          delete sr.spinFrames;delete sr.spinSize;delete sr.debug;scan=sr;
+          SCAN.ms=Math.round(performance.now()-t0);
+        }catch(e){
+          const c=e&&e.message;
+          const why=c==='modele'&&!document.querySelector('link[rel="manifest"]')?SCAN_WHY.modelePage:(SCAN_WHY[c]||SCAN_WHY.autre);
+          SCAN.note=`Le modèle 3D n’a pas pu être fait : ${why}. La vue 360° est prête. Pour la 3D, le plus sûr reste une vidéo d’un tour complet.`;
+          if(e&&e.spinFrames&&e.spinFrames.length>=8)r={frames:e.spinFrames,w:e.spinSize[0],h:e.spinSize[1]};
+          else{spinProg(0,'Lecture des photos…');r=await framesFromPhotos(files);}
+        }
+      }else r=await framesFromPhotos(files);
+    }
     const rec={v:1,frames:r.frames,w:r.w,h:r.h,date:new Date().toISOString(),src:kind==='video'?'video':'photos'};
     let kept=true;try{await spinPut(rec);}catch(e){kept=false;}
     if(scan){try{await scanPut(scan);}catch(e){kept=false;}}

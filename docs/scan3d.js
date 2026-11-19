@@ -26,6 +26,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 
 /* ---------- 1. Images de la vidéo ---------- */
 function seekTo(v, t) { return new Promise(res => { let done = false; const fin = () => { if (done) return; done = true; clearTimeout(to); v.removeEventListener('seeked', fin); res(); }; const to = setTimeout(fin, 4000); v.addEventListener('seeked', fin); v.currentTime = t; }); }
+const toGray = d => { const g = new Uint8Array(d.length >> 2); for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8; return g; };
 const toJpeg = (c, q = .85) => new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('jpeg')), 'image/jpeg', q));
 
 async function grabFrames(file, progress, seekOnly) {
@@ -42,9 +43,11 @@ async function grabFrames(file, progress, seekOnly) {
     const BW = Math.min(1280, vw), BH = Math.round(vh * BW / vw), SW = WS, SH = Math.round(vh * SW / vw);   // 1280 px : texture plus nette
     const big = document.createElement('canvas'); big.width = BW; big.height = BH; const gb = big.getContext('2d');
     const sm = document.createElement('canvas'); sm.width = SW; sm.height = SH; const gs = sm.getContext('2d', { willReadFrequently: true });
+    const GW = Math.min(640, vw), GH = Math.round(vh * GW / vw), gc = document.createElement('canvas'); gc.width = GW; gc.height = GH; const gg = gc.getContext('2d', { willReadFrequently: true });
+    const grays = new Array(N_FRAMES), grayOf = () => { gg.drawImage(v, 0, 0, GW, GH); return toGray(gg.getImageData(0, 0, GW, GH).data); };
     const T = Array.from({ length: N_FRAMES }, (_, i) => Math.min(dur - .05, (i + .5) * dur / N_FRAMES)), step = dur / N_FRAMES;
     const bigs = new Array(N_FRAMES), smalls = new Array(N_FRAMES), times = new Array(N_FRAMES), jobs = []; let got = 0;
-    const grab = (i, t) => { times[i] = t; gb.drawImage(v, 0, 0, BW, BH); gs.drawImage(v, 0, 0, SW, SH); smalls[i] = gs.getImageData(0, 0, SW, SH); got++; jobs.push(toJpeg(big).then(b => { bigs[i] = b; })); progress(got / N_FRAMES); };
+    const grab = (i, t) => { times[i] = t; gb.drawImage(v, 0, 0, BW, BH); gs.drawImage(v, 0, 0, SW, SH); smalls[i] = gs.getImageData(0, 0, SW, SH); grays[i] = grayOf(); got++; jobs.push(toJpeg(big).then(b => { bigs[i] = b; })); progress(got / N_FRAMES); };
     if ('requestVideoFrameCallback' in v && !seekOnly) {
       const rate = clamp(dur / 6, 1, 8);
       await new Promise(res => {
@@ -69,7 +72,7 @@ async function grabFrames(file, progress, seekOnly) {
     await Promise.all(jobs);
     let sum = 0; const px = smalls[N_FRAMES >> 1].data; for (let i = 0; i < px.length; i += 4 * 97) sum += px[i] + px[i + 1] + px[i + 2];
     if (sum === 0) throw new Error('lecture');
-    return { bigs, smalls, times, SW, SH, BW, BH, dur };
+    return { bigs, smalls, grays, times, SW, SH, BW, BH, GW, GH, dur };
   } finally { try { v.pause(); v.removeAttribute('src'); v.load(); v.remove(); } catch (e) {} URL.revokeObjectURL(url); }
 }
 
@@ -192,8 +195,8 @@ function shiftBetween(A, B) {
 /* ---------- 4. Caméras et sculpture ---------- */
 // Repère de la voiture : y vers le haut, origine au sol au centre du tour. Caméra i : position, droite, haut, avant.
 // yaw > 0 : caméra tournée vers la gauche du centre de la voiture ; pitch > 0 : caméra levée
-function makeCam(theta, d, yaw, pitch, th = TARGET_H) {
-  const C = [Math.sin(theta) * d, CAM_H, Math.cos(theta) * d];
+function makeCam(theta, d, yaw, pitch, th = TARGET_H, h = CAM_H, roll = 0) {
+  const C = [Math.sin(theta) * d, h, Math.cos(theta) * d];
   let fw = [-C[0], th - C[1], -C[2]]; const n0 = Math.hypot(...fw); fw = fw.map(v => v / n0);
   const cy = Math.cos(yaw), sy = Math.sin(yaw);                       // rotation autour de y (vers la gauche)
   fw = [fw[0] * cy + fw[2] * sy, fw[1], -fw[0] * sy + fw[2] * cy];
@@ -201,8 +204,11 @@ function makeCam(theta, d, yaw, pitch, th = TARGET_H) {
   let up = [rt[1] * fw[2] - rt[2] * fw[1], rt[2] * fw[0] - rt[0] * fw[2], rt[0] * fw[1] - rt[1] * fw[0]];
   const cp = Math.cos(pitch), sp = Math.sin(pitch);                   // voiture vue plus bas → caméra levée
   const f2 = fw.map((v, k) => v * cp + up[k] * sp), u2 = up.map((v, k) => v * cp - fw[k] * sp);
-  return { C, r: rt, u: u2, f: f2 };
+  if (!roll) return { C, r: rt, u: u2, f: f2 };
+  const cr = Math.cos(roll), sr = Math.sin(roll);                        // téléphone penché (roulis)
+  return { C, r: rt.map((v, k) => v * cr + u2[k] * sr), u: u2.map((v, k) => v * cr - rt[k] * sr), f: f2 };
 }
+const camOf = p => makeCam(p.theta, p.d, p.yaw, p.pitch, p.th, p.h, p.roll);
 function carve(cams, masks, SW, SH, fpx, box, n, coarse) {
   const { R, Y } = box, occ = new Uint8Array(n * n * n), nv = cams.length, maxOut = Math.max(2, Math.round(nv * .07));
   const order = []; for (let s = 0; s < 8; s++) for (let i = s; i < nv; i += 8) order.push(i);
@@ -243,27 +249,468 @@ function shapeOf(occ, n, box) { // axe long (analyse en composantes principales)
   return { alpha, L: l1 - l0, W: w1 - w0, H: (ymax + 1) / n * Y, cx: ac * ca - bc * sa, cz: ac * sa + bc * ca, voxels: c };
 }
 
-// Réglage fin : pour chaque image, l'angle et la distance qui font le mieux coller la forme sculptée à la silhouette
-function refineCams(occ, n, box, base, masks, SW, SH, fpx, ok, refineDist) {
+// Accord entre une forme sculptée et les silhouettes (sert d'arbitre entre deux jeux de caméras) : précision (points de
+// la forme qui tombent dans la silhouette) + rappel (silhouette couverte par la forme).
+function surfacePoints(occ, n, box, max) {
   const { R, Y } = box, pts = [];
   for (let z = 1; z < n - 1; z++) for (let y = 1; y < n - 1; y++) for (let x = 1; x < n - 1; x++) { const i = (z * n + y) * n + x; if (!occ[i]) continue;
-    if (occ[i - 1] && occ[i + 1] && occ[i - n] && occ[i + n] && occ[i - n * n] && occ[i + n * n]) continue; // surface seulement
-    if ((x + y + z) % 2) continue; pts.push(((x + .5) / n * 2 - 1) * R, (y + .5) / n * Y, ((z + .5) / n * 2 - 1) * R); }
-  const P = pts.length / 3, img = new Uint8Array(SW * SH);
-  const score = (cam, m) => { img.fill(0); let inC = 0, tot = 0;
-    for (let k = 0; k < P; k++) { const qx = pts[k * 3] - cam.C[0], qy = pts[k * 3 + 1] - cam.C[1], qz = pts[k * 3 + 2] - cam.C[2], zc = qx * cam.f[0] + qy * cam.f[1] + qz * cam.f[2]; if (zc < .3) continue;
-      const u = (SW / 2 + fpx * (qx * cam.r[0] + qy * cam.r[1] + qz * cam.r[2]) / zc) | 0, v = (SH / 2 - fpx * (qx * cam.u[0] + qy * cam.u[1] + qz * cam.u[2]) / zc) | 0;
-      if (u < 0 || v < 0 || u >= SW || v >= SH) continue; tot++; if (m[v * SW + u]) inC++; img[v * SW + u] = 1; }
-    let cover = 0, area = 0; for (let i = 0; i < SW * SH; i += 2) if (m[i]) { area++; if (img[i] || img[i + 1] || img[i - SW] || img[i + SW]) cover++; }
-    return (tot ? inC / tot : 0) + (area ? cover / area : 0); };
-  // le cap de la caméra (mesuré sur le décor) reste fixe : on cherche comment le répartir entre position (θ) et visée
-  const D = Math.PI / 180;
-  return base.map((p, j) => { let best = p, bs = -1;
-    const DS = refineDist ? [.96, 1, 1.04] : [1], DP = refineDist ? [-1.5, 0, 1.5] : [0];
-    for (const dt of [-4, -2.5, -1.2, 0, 1.2, 2.5, 4]) for (const ds of DS) for (const dp of DP) {
-      const q = { ...p, theta: p.theta - dt * D, yaw: p.yaw + dt * D, d: p.d * ds, pitch: p.pitch + dp * D }, sc = score(makeCam(q.theta, q.d, q.yaw, q.pitch, q.th), masks[j]) - (Math.abs(dt) / 25 + Math.abs(ds - 1) * .6 + Math.abs(dp) / 40);
-      if (sc > bs) { bs = sc; best = q; } }
-    return best; });
+    if (occ[i - 1] && occ[i + 1] && occ[i - n] && occ[i + n] && occ[i - n * n] && occ[i + n * n]) continue;   // surface seulement
+    pts.push(((x + .5) / n * 2 - 1) * R, (y + .5) / n * Y, ((z + .5) / n * 2 - 1) * R); }
+  const P = pts.length / 3, k = Math.max(1, Math.ceil(P / max)); if (k === 1) return Float32Array.from(pts);
+  const out = []; for (let i = 0; i < P; i += k) out.push(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
+  return Float32Array.from(out);
+}
+function silScore(cam, m, pts, SW, SH, fpx, img) {
+  img.fill(0); let inC = 0, tot = 0; const P = pts.length / 3;
+  for (let k = 0; k < P; k++) { const qx = pts[k * 3] - cam.C[0], qy = pts[k * 3 + 1] - cam.C[1], qz = pts[k * 3 + 2] - cam.C[2], zc = qx * cam.f[0] + qy * cam.f[1] + qz * cam.f[2]; if (zc < .3) continue;
+    const u = (SW / 2 + fpx * (qx * cam.r[0] + qy * cam.r[1] + qz * cam.r[2]) / zc) | 0, v = (SH / 2 - fpx * (qx * cam.u[0] + qy * cam.u[1] + qz * cam.u[2]) / zc) | 0;
+    if (u < 0 || v < 0 || u >= SW || v >= SH) continue; tot++; if (m[v * SW + u]) inC++; img[v * SW + u] = 1; }
+  let cover = 0, area = 0;
+  for (let i = SW; i < SW * (SH - 1); i += 2) if (m[i]) { area++; if (img[i] || img[i + 1] || img[i - 1] || img[i - SW] || img[i + SW]) cover++; }
+  return (tot ? inC / tot : 0) + (area ? cover / area : 0);
+}
+/* ---------- 4 ter. Calage des caméras par les points de détail (v0.20) ----------
+   Structure à partir du mouvement, en JavaScript pur : coins FAST + descripteur BRIEF sur les images en gris (640 px),
+   appariements entre images voisines filtrés par la géométrie à deux vues (matrice fondamentale, RANSAC adaptatif),
+   pistes, reconstruction de proche en proche (chaque image placée sur les points déjà connus et sur ses deux voisines,
+   en partant du mouvement estimé par le décor), puis ajustement de faisceaux (Levenberg-Marquardt, complément de Schur).
+   Caméras au format du scan (angle, distance, hauteur, visée, tangage, roulis). Sur la vidéo de synthèse : position
+   du téléphone à 1 à 2 cm près au lieu de 36 cm, orientation à 0,1-0,2° au lieu de 2°. */
+function rng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+const pop = x => { x -= (x >>> 1) & 0x55555555; x = (x & 0x33333333) + ((x >>> 2) & 0x33333333); return (((x + (x >>> 4)) & 0x0F0F0F0F) * 0x01010101) >>> 24; };
+
+// Valeurs propres d'une matrice symétrique n×n (Jacobi) : renvoie {vals, vecs} (vecs en colonnes, a[i*n+j])
+function eigSym(A, n) {
+  const a = Float64Array.from(A), v = new Float64Array(n * n); for (let i = 0; i < n; i++) v[i * n + i] = 1;
+  for (let sweep = 0; sweep < 60; sweep++) {
+    let off = 0; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += a[i * n + j] * a[i * n + j];
+    if (off < 1e-22) break;
+    for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) {
+      const apq = a[p * n + q]; if (Math.abs(apq) < 1e-300) continue;
+      const th = (a[q * n + q] - a[p * n + p]) / (2 * apq), t = Math.sign(th || 1) / (Math.abs(th) + Math.sqrt(th * th + 1)), c = 1 / Math.sqrt(t * t + 1), s = t * c;
+      for (let k = 0; k < n; k++) { const akp = a[k * n + p], akq = a[k * n + q]; a[k * n + p] = c * akp - s * akq; a[k * n + q] = s * akp + c * akq; }
+      for (let k = 0; k < n; k++) { const apk = a[p * n + k], aqk = a[q * n + k]; a[p * n + k] = c * apk - s * aqk; a[q * n + k] = s * apk + c * aqk; }
+      for (let k = 0; k < n; k++) { const vkp = v[k * n + p], vkq = v[k * n + q]; v[k * n + p] = c * vkp - s * vkq; v[k * n + q] = s * vkp + c * vkq; }
+    } }
+  const vals = []; for (let i = 0; i < n; i++) vals.push(a[i * n + i]);
+  return { vals, vecs: v };
+}
+
+// ---------- 1. points de détail ----------
+const CIRC = [[0, -3], [1, -3], [2, -2], [3, -1], [3, 0], [3, 1], [2, 2], [1, 3], [0, 3], [-1, 3], [-2, 2], [-3, 1], [-3, 0], [-3, -1], [-2, -2], [-1, -3]];
+let PAIRS = null;
+function briefPairs() {
+  if (PAIRS) return PAIRS; const r = rng(12345), g = () => { let s = 0; for (let k = 0; k < 6; k++) s += r(); return (s - 3) * 5.6; };
+  PAIRS = new Int8Array(256 * 4); for (let i = 0; i < 256 * 4; i++) PAIRS[i] = clamp(Math.round(g()), -13, 13); return PAIRS;
+}
+// g : niveaux de gris (Uint8Array W×H). mask (facultatif) : 1 = garder. Renvoie {n, x: Float32Array, y, desc: Uint32Array(n*8)}
+// Pyramide (échelles 1 ; 0,75 ; 0,56) : pour des photos prises de plus ou moins loin
+function featuresPyr(g, W, H, maxN = 1500, thr = 16, levels = 3) {
+  const outs = []; let cur = g, w = W, h = H, k = 1;
+  for (let l = 0; l < levels; l++) {
+    const f = features(cur, w, h, Math.round(maxN * (l === 0 ? .5 : .25)), thr); for (let i = 0; i < f.n; i++) { f.x[i] = (f.x[i] + .5) / k - .5; f.y[i] = (f.y[i] + .5) / k - .5; } outs.push(f);
+    const w2 = Math.round(w * .75), h2 = Math.round(h * .75), g2 = new Uint8Array(w2 * h2);
+    for (let y = 0; y < h2; y++) for (let x = 0; x < w2; x++) { const sx = (x + .5) / .75 - .5, sy = (y + .5) / .75 - .5, x0 = Math.min(w - 2, Math.max(0, sx | 0)), y0 = Math.min(h - 2, Math.max(0, sy | 0)), fx = sx - x0, fy = sy - y0;
+      g2[y * w2 + x] = (cur[y0 * w + x0] * (1 - fx) + cur[y0 * w + x0 + 1] * fx) * (1 - fy) + (cur[(y0 + 1) * w + x0] * (1 - fx) + cur[(y0 + 1) * w + x0 + 1] * fx) * fy; }
+    cur = g2; w = w2; h = h2; k *= .75; }
+  const n = outs.reduce((s, f) => s + f.n, 0), x = new Float32Array(n), y = new Float32Array(n), desc = new Uint32Array(n * 8); let o = 0;
+  for (const f of outs) { x.set(f.x, o); y.set(f.y, o); desc.set(f.desc, o * 8); o += f.n; }
+  return { n, x, y, desc };
+}
+function features(g, W, H, maxN = 1500, thr = 16, mask = null) {
+  const off = CIRC.map(([dx, dy]) => dy * W + dx), B = 18, score = new Float32Array(W * H), cand = [];
+  for (let y = B; y < H - B; y++) for (let x = B; x < W - B; x++) {
+    const i = y * W + x; if (mask && !mask[i]) continue;
+    const p = g[i], hi = p + thr, lo = p - thr;
+    const a0 = g[i + off[0]], a4 = g[i + off[4]], a8 = g[i + off[8]], a12 = g[i + off[12]];
+    let nb = (a0 > hi) + (a4 > hi) + (a8 > hi) + (a12 > hi), nd = (a0 < lo) + (a4 < lo) + (a8 < lo) + (a12 < lo);
+    if (nb < 2 && nd < 2) continue;
+    let best = 0;
+    for (const sgn of [1, -1]) { let run = 0;
+      for (let k = 0; k < 25; k++) { const v = g[i + off[k & 15]]; if (sgn > 0 ? v > hi : v < lo) { if (++run > best) best = run; } else run = 0; } }
+    if (best < 9) continue;
+    // réponse de Harris sur 5×5 (classe les coins)
+    let sxx = 0, syy = 0, sxy = 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const j = i + dy * W + dx, gx = g[j + 1] - g[j - 1], gy = g[j + W] - g[j - W]; sxx += gx * gx; syy += gy * gy; sxy += gx * gy; }
+    const s = sxx * syy - sxy * sxy - .04 * (sxx + syy) * (sxx + syy); if (s <= 0) continue;
+    score[i] = s; cand.push(i);
+  }
+  // non-maximum local 5×5, puis répartition sur une grille (pas tous les coins dans les feuilles)
+  const keep = [];
+  for (const i of cand) { const s = score[i]; let ok = true;
+    for (let dy = -2; dy <= 2 && ok; dy++) for (let dx = -2; dx <= 2; dx++) { if (!dx && !dy) continue; if (score[i + dy * W + dx] > s) { ok = false; break; } }
+    if (ok) keep.push(i); }
+  const GX = 16, GY = 10, per = Math.ceil(maxN / (GX * GY)) + 2, cells = Array.from({ length: GX * GY }, () => []);
+  for (const i of keep) { const x = i % W, y = (i / W) | 0; cells[Math.min(GY - 1, (y * GY / H) | 0) * GX + Math.min(GX - 1, (x * GX / W) | 0)].push(i); }
+  let sel = []; for (const c of cells) { c.sort((a, b) => score[b] - score[a]); sel.push(...c.slice(0, per)); }
+  sel.sort((a, b) => score[b] - score[a]); sel = sel.slice(0, maxN);
+  // BRIEF 256 bits sur l'image lissée (boîte 5×5 deux fois)
+  const sm = blur(blur(g, W, H, 2), W, H, 2), P = briefPairs(), n = sel.length, x = new Float32Array(n), y = new Float32Array(n), desc = new Uint32Array(n * 8);
+  for (let k = 0; k < n; k++) { const i = sel[k], cx = i % W, cy = (i / W) | 0;
+    // position affinée (parabole sur le score)
+    const sl = score[i - 1], sr = score[i + 1], su = score[i - W], sd = score[i + W], s0 = score[i];
+    const ddx = sl + sr - 2 * s0, ddy = su + sd - 2 * s0;
+    x[k] = cx + (ddx < 0 ? clamp(.5 * (sl - sr) / ddx, -.5, .5) : 0); y[k] = cy + (ddy < 0 ? clamp(.5 * (su - sd) / ddy, -.5, .5) : 0);
+    for (let b = 0; b < 256; b++) { const o = b * 4, v1 = sm[(cy + P[o + 1]) * W + cx + P[o]], v2 = sm[(cy + P[o + 3]) * W + cx + P[o + 2]]; if (v1 < v2) desc[k * 8 + (b >> 5)] |= 1 << (b & 31); } }
+  return { n, x, y, desc };
+}
+function blur(g, W, H, r) {
+  const t = new Float32Array(W * H), o = new Float32Array(W * H), k = 2 * r + 1;
+  for (let y = 0; y < H; y++) { let s = 0; for (let x = -r; x <= r; x++) s += g[y * W + clamp(x, 0, W - 1)];
+    for (let x = 0; x < W; x++) { t[y * W + x] = s / k; s += g[y * W + Math.min(W - 1, x + r + 1)] - g[y * W + Math.max(0, x - r)]; } }
+  for (let x = 0; x < W; x++) { let s = 0; for (let y = -r; y <= r; y++) s += t[clamp(y, 0, H - 1) * W + x];
+    for (let y = 0; y < H; y++) { o[y * W + x] = s / k; s += t[Math.min(H - 1, y + r + 1) * W + x] - t[Math.max(0, y - r) * W + x]; } }
+  return o;
+}
+
+// ---------- 2. appariement ----------
+// win : déplacement maximal cherché (pixels, horizontal et vertical) ; les points de B sont rangés dans une grille
+function match(A, B, ratio = .82, maxD = 72, win = null) {
+  const best = new Int32Array(A.n).fill(-1), d1 = new Int32Array(A.n), back = new Int32Array(B.n).fill(-1), bd = new Int32Array(B.n).fill(999);
+  const G = 32; let cols = 0, rows = 0, cells = null;
+  if (win) { for (let j = 0; j < B.n; j++) { cols = Math.max(cols, (B.x[j] / G | 0) + 1); rows = Math.max(rows, (B.y[j] / G | 0) + 1); }
+    cells = Array.from({ length: cols * rows }, () => []); for (let j = 0; j < B.n; j++) cells[(B.y[j] / G | 0) * cols + (B.x[j] / G | 0)].push(j); }
+  const test = (i, j, st) => { const ai = i * 8, bj = j * 8; let d = 0; for (let w = 0; w < 8; w++) d += pop(A.desc[ai + w] ^ B.desc[bj + w]);
+    if (d < st.b1) { st.b2 = st.b1; st.b1 = d; st.bi = j; } else if (d < st.b2) st.b2 = d;
+    if (d < bd[j]) { bd[j] = d; back[j] = i; } };
+  for (let i = 0; i < A.n; i++) { const st = { b1: 999, b2: 999, bi: -1 };
+    if (!win) for (let j = 0; j < B.n; j++) test(i, j, st);
+    else { const c0 = Math.max(0, ((A.x[i] - win[0]) / G) | 0), c1 = Math.min(cols - 1, ((A.x[i] + win[0]) / G) | 0), r0 = Math.max(0, ((A.y[i] - win[1]) / G) | 0), r1 = Math.min(rows - 1, ((A.y[i] + win[1]) / G) | 0);
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) for (const j of cells[r * cols + c]) test(i, j, st); }
+    if (st.b1 <= maxD && st.b1 < ratio * st.b2) { best[i] = st.bi; d1[i] = st.b1; } }
+  const out = []; for (let i = 0; i < A.n; i++) if (best[i] >= 0 && back[best[i]] === i) out.push(i, best[i]);
+  return out;
+}
+
+// ---------- 3. géométrie à deux vues : matrice fondamentale (8 points normalisés) + RANSAC ----------
+function normPts(xs, ys, idx) {
+  let mx = 0, my = 0; for (const i of idx) { mx += xs[i]; my += ys[i]; } mx /= idx.length; my /= idx.length;
+  let d = 0; for (const i of idx) d += Math.hypot(xs[i] - mx, ys[i] - my); d /= idx.length; const s = Math.SQRT2 / (d || 1);
+  return { mx, my, s };
+}
+function fit8(ax, ay, bx, by, idx) {
+  const na = normPts(ax, ay, idx), nb = normPts(bx, by, idx), M = new Float64Array(81);
+  for (const i of idx) { const x1 = (ax[i] - na.mx) * na.s, y1 = (ay[i] - na.my) * na.s, x2 = (bx[i] - nb.mx) * nb.s, y2 = (by[i] - nb.my) * nb.s;
+    const r = [x2 * x1, x2 * y1, x2, y2 * x1, y2 * y1, y2, x1, y1, 1];
+    for (let p = 0; p < 9; p++) for (let q = 0; q < 9; q++) M[p * 9 + q] += r[p] * r[q]; }
+  const { vals, vecs } = eigSym(M, 9); let k = 0; for (let i = 1; i < 9; i++) if (vals[i] < vals[k]) k = i;
+  let F = []; for (let i = 0; i < 9; i++) F.push(vecs[i * 9 + k]);
+  F = rank2(F);
+  // dénormalisation : F = Tbᵀ F Ta
+  const Ta = [na.s, 0, -na.s * na.mx, 0, na.s, -na.s * na.my, 0, 0, 1], Tb = [nb.s, 0, -nb.s * nb.mx, 0, nb.s, -nb.s * nb.my, 0, 0, 1];
+  return mul3(mul3(tr3(Tb), F), Ta);
+}
+const mul3 = (A, B) => { const C = new Array(9).fill(0); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) C[i * 3 + j] += A[i * 3 + k] * B[k * 3 + j]; return C; };
+const tr3 = A => [A[0], A[3], A[6], A[1], A[4], A[7], A[2], A[5], A[8]];
+function rank2(F) { // F = U S Vᵀ, plus petite valeur singulière mise à 0 (via FᵀF)
+  const FtF = mul3(tr3(F), F), { vals, vecs } = eigSym(FtF, 3); let k = 0; for (let i = 1; i < 3; i++) if (vals[i] < vals[k]) k = i;
+  const v = [vecs[k], vecs[3 + k], vecs[6 + k]], Fv = [F[0] * v[0] + F[1] * v[1] + F[2] * v[2], F[3] * v[0] + F[4] * v[1] + F[5] * v[2], F[6] * v[0] + F[7] * v[1] + F[8] * v[2]];
+  const out = F.slice(); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) out[i * 3 + j] -= Fv[i] * v[j]; return out;
+}
+function sampson(F, x1, y1, x2, y2) {
+  const Fx1 = [F[0] * x1 + F[1] * y1 + F[2], F[3] * x1 + F[4] * y1 + F[5], F[6] * x1 + F[7] * y1 + F[8]];
+  const Ftx2 = [F[0] * x2 + F[3] * y2 + F[6], F[1] * x2 + F[4] * y2 + F[7], F[2] * x2 + F[5] * y2 + F[8]];
+  const e = x2 * Fx1[0] + y2 * Fx1[1] + Fx1[2]; return e * e / (Fx1[0] * Fx1[0] + Fx1[1] * Fx1[1] + Ftx2[0] * Ftx2[0] + Ftx2[1] * Ftx2[1] + 1e-12);
+}
+function ransacF(A, B, m, thr = 2.0, iters = 400, seed = 7) {
+  const n = m.length / 2; if (n < 12) return [];
+  const ax = new Float64Array(n), ay = new Float64Array(n), bx = new Float64Array(n), by = new Float64Array(n);
+  for (let k = 0; k < n; k++) { ax[k] = A.x[m[2 * k]]; ay[k] = A.y[m[2 * k]]; bx[k] = B.x[m[2 * k + 1]]; by[k] = B.y[m[2 * k + 1]]; }
+  const r = rng(seed), t2 = thr * thr; let bestIn = null, bestN = 0, need = iters;
+  for (let it = 0; it < need; it++) {
+    const s = new Set(); while (s.size < 8) s.add(Math.floor(r() * n));
+    const F = fit8(ax, ay, bx, by, [...s]); const inl = [];
+    for (let k = 0; k < n; k++) if (sampson(F, ax[k], ay[k], bx[k], by[k]) < t2) inl.push(k);
+    if (inl.length > bestN) { bestN = inl.length; bestIn = inl;
+      // nombre de tirages suffisant pour 99 % de chances d'avoir tiré 8 bons appariements
+      const w8 = Math.pow(bestN / n, 8); need = Math.min(iters, Math.max(30, Math.ceil(Math.log(.01) / Math.log(Math.max(1e-12, 1 - w8))))); } }
+  if (!bestIn || bestN < 12) return [];
+  const F = fit8(ax, ay, bx, by, bestIn), out = [];
+  for (let k = 0; k < n; k++) if (sampson(F, ax[k], ay[k], bx[k], by[k]) < t2) out.push(m[2 * k], m[2 * k + 1]);
+  return out;
+}
+
+// ---------- 4. pistes (union-find) ----------
+function tracks(feats, pairMatches) {
+  const base = [0]; for (const f of feats) base.push(base[base.length - 1] + f.n);
+  const par = new Int32Array(base[base.length - 1]).map((_, i) => i), find = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
+  for (const { a, b, m } of pairMatches) for (let k = 0; k < m.length; k += 2) { const u = find(base[a] + m[k]), v = find(base[b] + m[k + 1]); if (u !== v) par[u] = v; }
+  const groups = new Map();
+  for (let f = 0; f < feats.length; f++) for (let i = 0; i < feats[f].n; i++) { const g = base[f] + i, r = find(g); if (r === g && !groups.has(r)) { /* racine seule ou non */ }
+    let L = groups.get(r); if (!L) { L = []; groups.set(r, L); } L.push(f, i); }
+  const out = [];
+  for (const L of groups.values()) { if (L.length < 4) continue; const seen = new Set(); let bad = false;
+    for (let k = 0; k < L.length; k += 2) { if (seen.has(L[k])) { bad = true; break; } seen.add(L[k]); }
+    if (!bad) out.push(L); }
+  return out;   // chaque piste : [image, point, image, point, …]
+}
+
+const KEYS = ['theta', 'd', 'h', 'yaw', 'pitch', 'roll'];
+function projPt(c, X, fpx, cx, cy, out) {
+  const qx = X[0] - c.C[0], qy = X[1] - c.C[1], qz = X[2] - c.C[2], z = qx * c.f[0] + qy * c.f[1] + qz * c.f[2];
+  out[0] = cx + fpx * (qx * c.r[0] + qy * c.r[1] + qz * c.r[2]) / z; out[1] = cy - fpx * (qx * c.u[0] + qy * c.u[1] + qz * c.u[2]) / z; return z;
+}
+// triangulation linéaire d'une piste
+function triang(cams, obs, fpx, cx, cy) {
+  const A = new Float64Array(9), b = new Float64Array(3);
+  for (let k = 0; k < obs.length; k += 3) { const c = cams[obs[k]], u = obs[k + 1] - cx, v = obs[k + 2] - cy;
+    for (const row of [[u * c.f[0] - fpx * c.r[0], u * c.f[1] - fpx * c.r[1], u * c.f[2] - fpx * c.r[2]], [v * c.f[0] + fpx * c.u[0], v * c.f[1] + fpx * c.u[1], v * c.f[2] + fpx * c.u[2]]]) {
+      const rc = row[0] * c.C[0] + row[1] * c.C[1] + row[2] * c.C[2];
+      for (let i = 0; i < 3; i++) { b[i] += row[i] * rc; for (let j = 0; j < 3; j++) A[i * 3 + j] += row[i] * row[j]; } } }
+  return solve3(A, b);
+}
+function solve3(A, b) {
+  const [a, bb, c, d, e, f, g, h, i] = A, det = a * (e * i - f * h) - bb * (d * i - f * g) + c * (d * h - e * g); if (Math.abs(det) < 1e-12) return null;
+  const inv = [(e * i - f * h), -(bb * i - c * h), (bb * f - c * e), -(d * i - f * g), (a * i - c * g), -(a * f - c * d), (d * h - e * g), -(a * h - bb * g), (a * e - bb * d)];
+  return [(inv[0] * b[0] + inv[1] * b[1] + inv[2] * b[2]) / det, (inv[3] * b[0] + inv[4] * b[1] + inv[5] * b[2]) / det, (inv[6] * b[0] + inv[7] * b[1] + inv[8] * b[2]) / det];
+}
+function inv3(M) { const [a, b, c, d, e, f, g, h, i] = M, det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g); if (Math.abs(det) < 1e-18) return null;
+  return [(e * i - f * h) / det, -(b * i - c * h) / det, (b * f - c * e) / det, -(d * i - f * g) / det, (a * i - c * g) / det, -(a * f - c * d) / det, (d * h - e * g) / det, -(a * h - b * g) / det, (a * e - b * d) / det]; }
+// Cholesky en place (matrice n×n symétrique définie positive) ; résout A x = b
+function cholSolve(A, b, n) {
+  const L = new Float64Array(n * n);
+  for (let j = 0; j < n; j++) { let s = A[j * n + j]; for (let k = 0; k < j; k++) s -= L[j * n + k] * L[j * n + k]; if (s <= 1e-12) return null; const ljj = Math.sqrt(s); L[j * n + j] = ljj;
+    for (let i = j + 1; i < n; i++) { let t = A[i * n + j]; for (let k = 0; k < j; k++) t -= L[i * n + k] * L[j * n + k]; L[i * n + j] = t / ljj; } }
+  const y = new Float64Array(n); for (let i = 0; i < n; i++) { let s = b[i]; for (let k = 0; k < i; k++) s -= L[i * n + k] * y[k]; y[i] = s / L[i * n + i]; }
+  const x = new Float64Array(n); for (let i = n - 1; i >= 0; i--) { let s = y[i]; for (let k = i + 1; k < n; k++) s -= L[k * n + i] * x[k]; x[i] = s / L[i * n + i]; }
+  return x;
+}
+
+// ---------- 6. ajustement de faisceaux ----------
+// poses : [{theta,d,h,yaw,pitch,roll,th}] ; obsList : pistes [[cam, u, v, cam, u, v, …]] ; renvoie poses ajustées + points
+async function bundle(poses0, trk, fpx, cx, cy, opt = {}) {
+  const nC = poses0.length, P = poses0.map(p => ({ ...p })), sig = opt.sigma || 2, iters = opt.iters ?? 25, fix = opt.fix ?? 0, fixed = opt.fixed || null;
+  const prior = opt.prior || { roll: 8 * Math.PI / 180 };
+  let cams = P.map(camOf), pts = [], obs = [];
+  if (opt.pts) { pts = opt.pts.map(X => X.slice()); obs = trk; }
+  else for (const t of trk) { const X = triang(cams, t, fpx, cx, cy); if (!X) continue;
+    let ok = true; const tmp = [0, 0]; for (let k = 0; k < t.length; k += 3) { if (projPt(cams[t[k]], X, fpx, cx, cy, tmp) < .3) { ok = false; break; } }
+    if (ok) { pts.push(X); obs.push(t); } }
+  const cost = (cs, X) => { let s = 0; const tmp = [0, 0];
+    for (let p = 0; p < obs.length; p++) { const t = obs[p];
+      for (let k = 0; k < t.length; k += 3) { const z = projPt(cs[t[k]], X[p], fpx, cx, cy, tmp); const e2 = z < .1 ? 1e4 : (tmp[0] - t[k + 1]) ** 2 + (tmp[1] - t[k + 2]) ** 2; s += sig * sig * Math.log1p(e2 / (sig * sig)); } }
+    return s; };
+  const priorCost = PP => { let s = 0; for (const p of PP) for (const k in prior) s += (p[k] / prior[k]) ** 2 * sig * sig;
+    if (opt.camPriors) PP.forEach((p, c) => { const cp = opt.camPriors[c]; if (!cp) return; if (cp.sd != null) s += ((p.d - cp.d) / cp.sd) ** 2 * sig * sig; if (cp.sh != null) s += ((p.h - cp.h) / cp.sh) ** 2 * sig * sig; }); return s; };
+  let lam = 1e-3, cur = cost(cams, pts) + priorCost(P); const hist = [Math.round(cur)];
+  const NP = 6, nPar = nC * NP, eps = [1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4];
+  for (let it = 0; it < iters; it++) {
+    // jacobiennes des caméras par différences finies (6 réglages)
+    const camsP = [], camsM = [];
+    for (let c = 0; c < nC; c++) { camsP.push([]); camsM.push([]); for (let k = 0; k < NP; k++) { const a = { ...P[c] }, b = { ...P[c] }; a[KEYS[k]] += eps[k]; b[KEYS[k]] -= eps[k]; camsP[c].push(camOf(a)); camsM[c].push(camOf(b)); } }
+    const U = new Float64Array(nPar * nPar), gc = new Float64Array(nPar), Vinv = [], Wp = [], gp = [];
+    const tmp = [0, 0], tp = [0, 0], tm = [0, 0];
+    // a priori (roulis proche de 0…) : termes quadratiques sur les caméras
+    for (let c = 0; c < nC; c++) for (const key in prior) { const k = KEYS.indexOf(key), w = sig * sig / (prior[key] ** 2), i = c * NP + k; U[i * nPar + i] += w; gc[i] += w * P[c][key]; }
+    if (opt.camPriors) for (let c = 0; c < nC; c++) { const cp = opt.camPriors[c]; if (!cp) continue;
+      for (const [key, mean, sd] of [['d', cp.d, cp.sd], ['h', cp.h, cp.sh]]) { if (sd == null) continue; const k = KEYS.indexOf(key), w = sig * sig / (sd * sd), i = c * NP + k; U[i * nPar + i] += w; gc[i] += w * (P[c][key] - mean); } }
+    for (let p = 0; p < obs.length; p++) { const t = obs[p], X = pts[p], V = new Float64Array(9), g3 = new Float64Array(3), Wl = [];
+      for (let k = 0; k < t.length; k += 3) { const ci = t[k], cam = cams[ci], z = projPt(cam, X, fpx, cx, cy, tmp); if (z < .1) continue;
+        const rx = tmp[0] - t[k + 1], ry = tmp[1] - t[k + 2], e2 = rx * rx + ry * ry, w = 1 / (1 + e2 / (sig * sig));
+        // dérivées / point (analytiques)
+        const qx = X[0] - cam.C[0], qy = X[1] - cam.C[1], qz = X[2] - cam.C[2], a = qx * cam.r[0] + qy * cam.r[1] + qz * cam.r[2], b = qx * cam.u[0] + qy * cam.u[1] + qz * cam.u[2];
+        const Jp = [fpx * (cam.r[0] * z - a * cam.f[0]) / (z * z), fpx * (cam.r[1] * z - a * cam.f[1]) / (z * z), fpx * (cam.r[2] * z - a * cam.f[2]) / (z * z),
+          -fpx * (cam.u[0] * z - b * cam.f[0]) / (z * z), -fpx * (cam.u[1] * z - b * cam.f[1]) / (z * z), -fpx * (cam.u[2] * z - b * cam.f[2]) / (z * z)];
+        const Jc = new Float64Array(12);
+        for (let q = 0; q < NP; q++) { projPt(camsP[ci][q], X, fpx, cx, cy, tp); projPt(camsM[ci][q], X, fpx, cx, cy, tm); Jc[q] = (tp[0] - tm[0]) / (2 * eps[q]); Jc[6 + q] = (tp[1] - tm[1]) / (2 * eps[q]); }
+        const o = ci * NP;
+        for (let q = 0; q < NP; q++) { gc[o + q] += w * (Jc[q] * rx + Jc[6 + q] * ry);
+          for (let s = 0; s < NP; s++) U[(o + q) * nPar + o + s] += w * (Jc[q] * Jc[s] + Jc[6 + q] * Jc[6 + s]); }
+        for (let q = 0; q < 3; q++) { g3[q] += w * (Jp[q] * rx + Jp[3 + q] * ry); for (let s = 0; s < 3; s++) V[q * 3 + s] += w * (Jp[q] * Jp[s] + Jp[3 + q] * Jp[3 + s]); }
+        const Wm = new Float64Array(18); for (let q = 0; q < NP; q++) for (let s = 0; s < 3; s++) Wm[q * 3 + s] = w * (Jc[q] * Jp[s] + Jc[6 + q] * Jp[3 + s]);
+        Wl.push(ci, Wm); }
+      Vinv.push(V); Wp.push(Wl); gp.push(g3); }
+    // essais avec amortissement croissant
+    let accepted = false;
+    for (let tries = 0; tries < 8 && !accepted; tries++) {
+      const S = Float64Array.from(U), rhs = Float64Array.from(gc).map(v => -v);
+      for (let i = 0; i < nPar; i++) S[i * nPar + i] += lam * (U[i * nPar + i] + 1e-6);
+      // jauge : angle de la caméra de référence fixé ; caméras figées : tous leurs réglages
+      { const i = fix * NP; S[i * nPar + i] += 1e12; }
+      if (fixed) for (let c = 0; c < nC; c++) if (fixed[c]) for (let k = 0; k < NP; k++) { const i = c * NP + k; S[i * nPar + i] += 1e12; }
+      const Vi = [];
+      for (let p = 0; p < obs.length; p++) { const V = Vinv[p].slice(); for (let q = 0; q < 3; q++) V[q * 3 + q] += lam * V[q * 3 + q] + 1e-9; const vi = inv3(V); Vi.push(vi); if (!vi) continue;
+        const Wl = Wp[p], g3 = gp[p], vg = [vi[0] * g3[0] + vi[1] * g3[1] + vi[2] * g3[2], vi[3] * g3[0] + vi[4] * g3[1] + vi[5] * g3[2], vi[6] * g3[0] + vi[7] * g3[1] + vi[8] * g3[2]];
+        for (let a = 0; a < Wl.length; a += 2) { const ca = Wl[a], Wa = Wl[a + 1], WaV = new Float64Array(18);
+          for (let q = 0; q < NP; q++) for (let s = 0; s < 3; s++) WaV[q * 3 + s] = Wa[q * 3] * vi[s] + Wa[q * 3 + 1] * vi[3 + s] + Wa[q * 3 + 2] * vi[6 + s];
+          for (let q = 0; q < NP; q++) rhs[ca * NP + q] += WaV[q * 3] * g3[0] + WaV[q * 3 + 1] * g3[1] + WaV[q * 3 + 2] * g3[2];
+          for (let b = 0; b < Wl.length; b += 2) { const cb = Wl[b], Wb = Wl[b + 1];
+            for (let q = 0; q < NP; q++) for (let s = 0; s < NP; s++) S[(ca * NP + q) * nPar + cb * NP + s] -= WaV[q * 3] * Wb[s * 3] + WaV[q * 3 + 1] * Wb[s * 3 + 1] + WaV[q * 3 + 2] * Wb[s * 3 + 2]; } } }
+      const dc = cholSolve(S, rhs, nPar); if (!dc) { lam *= 10; continue; }
+      const P2 = P.map((p, c) => { const q = { ...p }; for (let k = 0; k < NP; k++) q[KEYS[k]] += dc[c * NP + k]; return q; });
+      const pts2 = pts.map((X, p) => { const vi = Vi[p]; if (!vi) return X; const g3 = gp[p], Wl = Wp[p], r = [-g3[0], -g3[1], -g3[2]];
+        for (let a = 0; a < Wl.length; a += 2) { const ca = Wl[a], Wa = Wl[a + 1]; for (let s = 0; s < 3; s++) for (let q = 0; q < NP; q++) r[s] -= Wa[q * 3 + s] * dc[ca * NP + q]; }
+        return [X[0] + vi[0] * r[0] + vi[1] * r[1] + vi[2] * r[2], X[1] + vi[3] * r[0] + vi[4] * r[1] + vi[5] * r[2], X[2] + vi[6] * r[0] + vi[7] * r[1] + vi[8] * r[2]]; });
+      const cams2 = P2.map(camOf), c2 = cost(cams2, pts2) + priorCost(P2);
+      if (c2 < cur) { // échelle : distance médiane gardée (sauf si une caméra figée la fixe déjà)
+        const ds = P2.map(p => p.d).sort((a, b) => a - b), k = fixed ? 1 : (opt.d0 || ds[ds.length >> 1]) / ds[ds.length >> 1];
+        P2.forEach(p => { p.d *= k; p.h *= k; }); pts2.forEach(X => { X[0] *= k; X[1] *= k; X[2] *= k; });
+        P.splice(0, nC, ...P2); pts = pts2; cams = P.map(camOf); cur = cost(cams, pts) + priorCost(P); lam = Math.max(1e-7, lam / 4); accepted = true; }
+      else lam *= 6; }
+    hist.push(Math.round(cur)); opt.onIter && opt.onIter((it + 1) / iters); await tick();
+    if (!accepted) break; }
+  // erreurs de reprojection finales
+  const errs = []; const tmp = [0, 0];
+  for (let p = 0; p < obs.length; p++) { const t = obs[p]; for (let k = 0; k < t.length; k += 3) { projPt(cams[t[k]], pts[p], fpx, cx, cy, tmp); errs.push(Math.hypot(tmp[0] - t[k + 1], tmp[1] - t[k + 2])); } }
+  errs.sort((a, b) => a - b);
+  return { poses: P, pts, obs, hist, medErr: errs[errs.length >> 1], p90: errs[Math.floor(errs.length * .9)] };
+}
+
+// Inverse de makeCam : position et axes (repère du monde) → réglages du scan (angle, distance, hauteur, visée, tangage, roulis)
+function poseFromCam(C, r, u, f, th) {
+  const theta = Math.atan2(C[0], C[2]), d = Math.hypot(C[0], C[2]), h = C[1];
+  let fw = [-C[0], th - C[1], -C[2]]; const n0 = Math.hypot(...fw); fw = fw.map(v => v / n0);
+  const h0 = Math.atan2(fw[0], fw[2]), hf = Math.atan2(f[0], f[2]);
+  // makeCam : fw' = [fw0 cy + fw2 sy, fw1, -fw0 sy + fw2 cy] (rotation de +yaw autour de y, sens « vers la gauche »)
+  const yaw = Math.atan2(Math.sin(hf - h0), Math.cos(hf - h0));
+  const pitch = Math.asin(Math.max(-1, Math.min(1, f[1]))) - Math.asin(Math.max(-1, Math.min(1, fw[1])));
+  const c0 = makeCam(theta, d, yaw, pitch, th, h, 0);
+  const roll = Math.atan2(r[0] * c0.u[0] + r[1] * c0.u[1] + r[2] * c0.u[2], r[0] * c0.r[0] + r[1] * c0.r[1] + r[2] * c0.r[2]);
+  return { theta, d, h, yaw, pitch, roll, th };
+}
+
+function normM(A, B, m, fpx, cx, cy) { const o = []; for (let k = 0; k < m.length; k += 2) o.push((A.x[m[k]] + .5 - cx) / fpx, (A.y[m[k]] + .5 - cy) / fpx, (B.x[m[k + 1]] + .5 - cx) / fpx, (B.y[m[k + 1]] + .5 - cy) / fpx); return o; }
+async function incremental(feats, pairs, n, fpx, cx, cy, P0, th, opt = {}) {
+  const T = tracks(feats, pairs), nT = T.length, byFrame = Array.from({ length: n }, () => []);
+  T.forEach((L, t) => { for (let k = 0; k < L.length; k += 2) byFrame[L[k]].push(t, feats[L[k]].x[L[k + 1]] + .5, feats[L[k]].y[L[k + 1]] + .5); });
+  const X = new Array(nT).fill(null), poses = new Array(n).fill(null), reg = new Array(n).fill(false);
+  const obsOf = t => { const L = T[t], o = []; for (let k = 0; k < L.length; k += 2) if (reg[L[k]]) o.push(L[k], feats[L[k]].x[L[k + 1]] + .5, feats[L[k]].y[L[k + 1]] + .5); return o; };
+  const tmp = [0, 0];
+  const triNew = () => { let added = 0; const cams = poses.map(p => p ? camOf(p) : null);
+    for (let t = 0; t < nT; t++) { if (X[t]) continue; const o = obsOf(t); if (o.length < 6) continue;
+      const Xp = triang(cams, o, fpx, cx, cy); if (!Xp) continue; let good = true;
+      for (let k = 0; k < o.length; k += 3) { const z = projPt(cams[o[k]], Xp, fpx, cx, cy, tmp); if (z < .3 || Math.hypot(tmp[0] - o[k + 1], tmp[1] - o[k + 2]) > 3) { good = false; break; } }
+      // angle entre les rayons extrêmes (points trop loin ou mal placés écartés)
+      if (good) { const a = cams[o[0]].C, b = cams[o[o.length - 3]].C, va = [Xp[0] - a[0], Xp[1] - a[1], Xp[2] - a[2]], vb = [Xp[0] - b[0], Xp[1] - b[1], Xp[2] - b[2]];
+        const cosv = (va[0] * vb[0] + va[1] * vb[1] + va[2] * vb[2]) / (Math.hypot(...va) * Math.hypot(...vb)); if (cosv > Math.cos(1.5 * Math.PI / 180)) good = false; }
+      if (good) { X[t] = Xp; added++; } }
+    return added; };
+  const ba = async (iters, fix0 = true) => { const idx = []; for (let c = 0; c < n; c++) if (reg[c]) idx.push(c); const loc = new Map(idx.map((c, i) => [c, i]));
+    const trk = [], pts = [], tid = [];
+    for (let t = 0; t < nT; t++) { if (!X[t]) continue; const o = obsOf(t); if (o.length < 6) continue; const oo = []; for (let k = 0; k < o.length; k += 3) oo.push(loc.get(o[k]), o[k + 1], o[k + 2]); trk.push(oo); pts.push(X[t]); tid.push(t); }
+    const fixed = idx.map(c => fix0 && c === 0), hs = idx.map(c => poses[c].h).sort((a, b) => a - b), hm = hs[hs.length >> 1], kd = poses[0].d / P0[0].d;
+    const camPriors = idx.map(c => ({ d: P0[c].d * kd, sd: .12 * P0[c].d * kd, h: hm, sh: .35 }));
+    const r = await bundle(idx.map(c => poses[c]), trk, fpx, cx, cy, { iters, sigma: 2, pts, fixed, camPriors, prior: opt.prior || { roll: 10 * Math.PI / 180 }, onIter: opt.onBA });
+    idx.forEach((c, i) => { poses[c] = r.poses[i]; }); tid.forEach((t, i) => { X[t] = r.pts[i]; });
+    // points devenus faux : retirés (ils pourront revenir)
+    const cams = poses.map(p => p ? camOf(p) : null); let removed = 0;
+    for (const t of tid) { const o = obsOf(t); for (let k = 0; k < o.length; k += 3) { const z = projPt(cams[o[k]], X[t], fpx, cx, cy, tmp); if (z < .2 || Math.hypot(tmp[0] - o[k + 1], tmp[1] - o[k + 2]) > 4) { X[t] = null; removed++; break; } } }
+    return { med: r.medErr, removed }; };
+  // départ : caméra 0 telle qu'estimée par le scan ; caméra 1 par la géométrie à deux vues, à la distance prévue
+  poses[0] = { ...P0[0] }; reg[0] = true;
+  let strong = 1;
+  { const m = pairs.find(p => p.a === 0 && p.b === 1);
+    let p1 = { ...P0[1] };
+    if (m) { p1 = registerCam(P0[1], [], [], [{ pose: poses[0], m: normM(feats[0], feats[1], m.m, fpx, cx, cy) }], fpx, cx, cy, { d: P0[1].d, sd: .05 * P0[1].d, h: P0[0].h, sh: .3, sr: .2 }); strong++; }
+    poses[1] = p1; reg[1] = true; }
+  triNew(); await ba(15);
+  // ordre : en avant depuis 1, et en arrière depuis la fin (les dernières images recouvrent les premières), en alternance
+  const order = []; { let f = 2, bk = n - 1; while (f <= bk) { order.push([f, -1]); f++; if (f <= bk && opt.bidir !== false) { order.push([bk, 1]); bk--; } } }
+  const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
+  let nb = 0;
+  for (const [k, dir] of order) {
+    const k1 = (k + dir + n) % n, a = poses[k1], init = {};
+    for (const key of KEYS) init[key] = a[key] + (key === 'd' ? 0 : wrapA(P0[k][key] - P0[k1][key]));
+    init.d = a.d * P0[k].d / P0[k1].d; init.th = th;
+    const L = byFrame[k], Xs = [], uv = []; for (let q = 0; q < L.length; q += 3) if (X[L[q]]) { Xs.push(X[L[q]]); uv.push(L[q + 1], L[q + 2]); }
+    let pose = init;
+    const epi = []; for (const back of [1, 2]) { const j = (k + dir * back + n) % n; if (!reg[j]) continue; const lo = Math.min(j, k), hi = Math.max(j, k), pm = pairs.find(p => p.a === lo && p.b === hi);
+      if (pm) epi.push({ pose: poses[j], m: lo === j ? normM(feats[j], feats[k], pm.m, fpx, cx, cy) : normM(feats[k], feats[j], pm.m, fpx, cx, cy).map((v, i, arr) => arr[i ^ 2]) }); }
+    if (Xs.length >= 6 || epi.length) { const pd = init.d;
+      pose = registerCam(init, Xs, uv, epi, fpx, cx, cy, { d: pd, sd: .08 * pd, h: a.h, sh: .25, sr: .25, sa: (opt.sa || 5) * Math.PI / 180 });
+      if (Xs.length >= 12 || epi.reduce((s, e) => s + e.m.length / 4, 0) >= 40) strong++; }
+    poses[k] = pose; reg[k] = true; triNew();
+    if (++nb % 3 === 0) { opt.onProg && opt.onProg(nb / order.length); await tick(); }
+  }
+  // boucle refermée : on retriangule (pistes qui relient la fin au début) puis ajustement global
+  triNew(); const fin = await ba(opt.finalIters ?? 20);
+  // appui de chaque image : points bien reprojetés (< 2 px). Une image peu appuyée est mal placée (essai sur de vraies photos)
+  const cams = poses.map(camOf), support = new Array(n).fill(0);
+  for (let t = 0; t < nT; t++) { if (!X[t]) continue; const L = T[t]; for (let k = 0; k < L.length; k += 2) { const f = L[k], z = projPt(cams[f], X[t], fpx, cx, cy, tmp);
+    if (z > .2 && Math.hypot(tmp[0] - feats[f].x[L[k + 1]] - .5, tmp[1] - feats[f].y[L[k + 1]] - .5) < 2) support[f]++; } }
+  return { poses, X, med: fin.med, strong: strong / n, support, nPts: X.filter(Boolean).length };
+}
+
+// Placement d'une caméra : points 3D connus (reprojection) + géométrie avec les caméras voisines déjà placées
+// (distance de Sampson, en pixels) + attente douce sur la distance et la hauteur. Levenberg-Marquardt, 6 réglages.
+function registerCam(init, Xs, uv, epi, fpx, cx, cy, prior, sigs = [12, 4, 1.5], iters = 15) {
+  const NP = 6, eps = 1e-4, tmp = [0, 0];
+  const Rof = c => [c.r[0], c.r[1], c.r[2], -c.u[0], -c.u[1], -c.u[2], c.f[0], c.f[1], c.f[2]];
+  const epiPre = epi.map(e => ({ R: Rof(camOf(e.pose)), C: camOf(e.pose).C, m: e.m }));   // m : [xj, yj, xk, yk, …] en coordonnées normalisées
+  const resid = (q, sig, out) => {   // remplit out (résidus pondérés « racine de Cauchy »)
+    const c = camOf(q), Rk = Rof(c); let n = 0;
+    for (let i = 0; i < Xs.length; i++) { const z = projPt(c, Xs[i], fpx, cx, cy, tmp); const rx = z < .1 ? 50 : tmp[0] - uv[2 * i], ry = z < .1 ? 50 : tmp[1] - uv[2 * i + 1]; out[n++] = rx; out[n++] = ry; }
+    for (const e of epiPre) { const R = mul3(Rk, tr3(e.R)), dC = [e.C[0] - c.C[0], e.C[1] - c.C[1], e.C[2] - c.C[2]], t = [0, 1, 2].map(i => Rk[i * 3] * dC[0] + Rk[i * 3 + 1] * dC[1] + Rk[i * 3 + 2] * dC[2]);
+      const nt = Math.hypot(...t) || 1, tx = [0, -t[2] / nt, t[1] / nt, t[2] / nt, 0, -t[0] / nt, -t[1] / nt, t[0] / nt, 0], E = mul3(tx, R), m = e.m;
+      for (let k = 0; k < m.length; k += 4) { const x1 = m[k], y1 = m[k + 1], x2 = m[k + 2], y2 = m[k + 3];
+        const Ex1 = [E[0] * x1 + E[1] * y1 + E[2], E[3] * x1 + E[4] * y1 + E[5], E[6] * x1 + E[7] * y1 + E[8]], Etx2 = [E[0] * x2 + E[3] * y2 + E[6], E[1] * x2 + E[4] * y2 + E[7], E[2] * x2 + E[5] * y2 + E[8]];
+        const num = x2 * Ex1[0] + y2 * Ex1[1] + Ex1[2], den = Math.sqrt(Ex1[0] ** 2 + Ex1[1] ** 2 + Etx2[0] ** 2 + Etx2[1] ** 2) + 1e-12; out[n++] = fpx * num / den; } }
+    if (prior) { out[n++] = (q.d - prior.d) / (prior.sd || 1) * sig; out[n++] = (q.h - prior.h) / (prior.sh || 1) * sig; out[n++] = q.roll / (prior.sr || 1) * sig;
+      if (prior.sa) for (const k of ['theta', 'yaw', 'pitch']) out[n++] = Math.atan2(Math.sin(q[k] - init[k]), Math.cos(q[k] - init[k])) / prior.sa * sig; }
+    return n; };
+  let p = { ...init }; const nR = 2 * Xs.length + epi.reduce((s, e) => s + e.m.length / 4, 0) + 6, r0 = new Float64Array(nR), rp = new Float64Array(nR), rm = new Float64Array(nR);
+  const costOf = (q, sig) => { const n = resid(q, sig, r0); let s = 0; for (let i = 0; i < n; i++) s += Math.log1p(r0[i] * r0[i] / (sig * sig)); return s; };
+  for (const sig of sigs) { let lam = 1e-3, cur = costOf(p, sig);
+    for (let it = 0; it < iters; it++) {
+      const n = resid(p, sig, r0), w = new Float64Array(n); for (let i = 0; i < n; i++) w[i] = 1 / (1 + r0[i] * r0[i] / (sig * sig));
+      const J = []; for (let k = 0; k < NP; k++) { const a = { ...p }, b = { ...p }; a[KEYS[k]] += eps; b[KEYS[k]] -= eps; resid(a, sig, rp); resid(b, sig, rm); const col = new Float64Array(n); for (let i = 0; i < n; i++) col[i] = (rp[i] - rm[i]) / (2 * eps); J.push(col); }
+      const A = new Float64Array(36), g = new Float64Array(6);
+      for (let a = 0; a < NP; a++) { for (let i = 0; i < n; i++) g[a] += w[i] * J[a][i] * r0[i]; for (let b = a; b < NP; b++) { let s = 0; for (let i = 0; i < n; i++) s += w[i] * J[a][i] * J[b][i]; A[a * 6 + b] = A[b * 6 + a] = s; } }
+      let ok = false;
+      for (let t = 0; t < 8 && !ok; t++) { const M = Float64Array.from(A); for (let a = 0; a < NP; a++) M[a * 6 + a] += lam * (A[a * 6 + a] + 1e-6);
+        const d = cholSolve(M, Float64Array.from(g).map(v => -v), NP); if (!d) { lam *= 10; continue; }
+        const q = { ...p }; for (let k = 0; k < NP; k++) q[KEYS[k]] += d[k]; const c2 = costOf(q, sig);
+        if (c2 < cur) { p = q; cur = c2; lam = Math.max(1e-7, lam / 4); ok = true; } else lam *= 6; }
+      if (!ok) break; } }
+  return p;
+}
+
+// Pilote : points de détail, appariements, reconstruction ; puis mise à niveau (le haut des téléphones en moyenne donne la
+// verticale), centre de la voiture au croisement des visées, sol trouvé sur la couche de points la plus basse autour de la
+// voiture (sinon : téléphones à la hauteur supposée). null si le calage n'est pas assez sûr.
+async function sfmCameras(F, vis, P0, fpxG, progress) {
+  const { GW, GH } = F, n = vis.length, t0 = performance.now(), feats = [];
+  for (let j = 0; j < n; j++) { feats.push(F.photos ? featuresPyr(F.grays[vis[j]], GW, GH, 1500, 16, 3) : features(F.grays[vis[j]], GW, GH, 1500, 16)); if (j % 4 === 3) { progress(.2 * (j + 1) / n); await tick(); } }
+  const win = F.photos ? [GW * .47, GH * .36] : [GW * .22, GH * .19], pairs = [];
+  for (let i = 0; i < n; i++) { for (const s of [1, 2]) { const j = (i + s) % n; if (j === i) continue;
+      const m = match(feats[i], feats[j], .82, 72, win), f = ransacF(feats[i], feats[j], m, 2, 500, i * 3 + s);
+      if (f.length >= 20 && f.length >= .12 * m.length) pairs.push(i < j ? { a: i, b: j, m: f } : { a: j, b: i, m: f.map((_, k) => f[k ^ 1]) }); }
+    if (i % 3 === 2) { progress(.2 + .35 * (i + 1) / n); await tick(); } }
+  const tm = performance.now() - t0;
+  if (pairs.length < n * .8) return { info: { ms: Math.round(tm), paires: pairs.length, refus: 'peu de paires' } };
+  const R = await incremental(feats, pairs, n, fpxG, GW / 2, GH / 2, P0, TARGET_H, { onProg: k => progress(.55 + .25 * k), onBA: k => progress(.8 + .18 * k) });
+  const weak = R.support.map(v => v < 15), nw = weak.filter(Boolean).length;
+  const info = { ms: Math.round(performance.now() - t0), appariementsMs: Math.round(tm), paires: pairs.length, points: R.nPts, erreurPx: Math.round(R.med * 100) / 100, appuiMedian: median(R.support), ecartees: nw };
+  if (!(R.med < 1.2) || nw > n * .25 || R.nPts < 15 * n) return { info: Object.assign(info, { refus: 'calage peu sûr' }) };
+  // mise à niveau : on tient son téléphone sans le pencher sur le côté, donc le bord horizontal des images (vecteur
+  // « droite ») est à peu près horizontal ; la verticale est la direction la plus perpendiculaire à tous ces bords
+  // (sur de vraies photos : 0,7° d'écart, contre 2,4° avec la moyenne des « haut », faussée par le tangage)
+  const cams = R.poses.map(camOf), Mr = new Float64Array(9); let um = [0, 0, 0];
+  cams.forEach(c => { for (let i = 0; i < 3; i++) { um[i] += c.u[i]; for (let j = 0; j < 3; j++) Mr[i * 3 + j] += c.r[i] * c.r[j]; } });
+  const Er = eigSym(Mr, 3); let ke = 0; for (let i = 1; i < 3; i++) if (Er.vals[i] < Er.vals[ke]) ke = i;
+  let up = [Er.vecs[ke], Er.vecs[3 + ke], Er.vecs[6 + ke]]; if (up[0] * um[0] + up[1] * um[1] + up[2] * um[2] < 0) up = up.map(v => -v);
+  { const un = Math.hypot(...up); up = up.map(v => v / un); }
+  const ax = [-up[2], 0, up[0]], s = Math.hypot(...ax), co = up[1], rot = (() => {   // axe = haut × vertical if (s < 1e-9) return [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    const k = ax.map(v => v / s), K = [0, -k[2], k[1], k[2], 0, -k[0], -k[1], k[0], 0], K2 = mul3(K, K); return [0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => (i % 4 === 0 ? 1 : 0) + s * K[i] + (1 - co) * K2[i]); })();
+  const ap = v => [rot[0] * v[0] + rot[1] * v[1] + rot[2] * v[2], rot[3] * v[0] + rot[4] * v[1] + rot[5] * v[2], rot[6] * v[0] + rot[7] * v[1] + rot[8] * v[2]];
+  const C = cams.map(c => ap(c.C)), Rr = cams.map(c => ap(c.r)), Uu = cams.map(c => ap(c.u)), Ff = cams.map(c => ap(c.f)), pts = R.X.filter(Boolean).map(ap);
+  // centre : point le plus proche de toutes les visées (plan horizontal)
+  let a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0;
+  for (let k = 0; k < n; k++) { const l = Math.hypot(Ff[k][0], Ff[k][2]) || 1, ux = Ff[k][0] / l, uz = Ff[k][2] / l, p11 = 1 - ux * ux, p12 = -ux * uz, p22 = 1 - uz * uz;
+    a11 += p11; a12 += p12; a22 += p22; b1 += p11 * C[k][0] + p12 * C[k][2]; b2 += p12 * C[k][0] + p22 * C[k][2]; }
+  const det = a11 * a22 - a12 * a12; if (Math.abs(det) < 1e-9) return { info: Object.assign(info, { refus: 'visées parallèles' }) };
+  let cx0 = (b1 * a22 - a12 * b2) / det, cz0 = (a11 * b2 - a12 * b1) / det;
+  // échelle : l'ajustement ne la fixe pas ; distance médiane des téléphones à la voiture = celle tirée de la taille des
+  // silhouettes (comme l'estimation par le décor)
+  { const k = median(P0.map(p => p.d)) / median(C.map(c => Math.hypot(c[0] - cx0, c[2] - cz0)));
+    for (const c of C) { c[0] *= k; c[1] *= k; c[2] *= k; } for (const p of pts) { p[0] *= k; p[1] *= k; p[2] *= k; } cx0 *= k; cz0 *= k; info.echelle = Math.round(k * 100) / 100; }
+  // sol : téléphones à la hauteur supposée (celle des conseils de tournage, comme l'estimation par le décor). Essayés et
+  // écartés : les points de décor au sol (trop rares, sol trouvé jusqu'à 19 cm trop haut) et le bas des pneus sur les
+  // vues de côté (le détourage rate le bas sombre des pneus : sol 17 cm trop haut sur la vidéo de test)
+  const hm = median(C.map(c => c[1])), yg = hm - CAM_H, sol = 'hauteur supposée';
+  info.sol = sol; info.hauteurM = Math.round((hm - yg) * 100) / 100;
+  const poses = C.map((c, k) => poseFromCam([c[0] - cx0, c[1] - yg, c[2] - cz0], Rr[k], Uu[k], Ff[k], TARGET_H));
+  return { poses, weak, info };
 }
 
 /* ---------- 4 bis. Forme fine dans le repère de la voiture (v0.15.1) ---------- */
@@ -278,12 +725,12 @@ function morph3(occ, n, grow) { // dilatation (grow) ou érosion d'un cube, vois
     a = b; }
   return a;
 }
-function carveAligned(cams, masks, SW, SH, fpx, S, sh) {
+function carveAligned(cams, masks, SW, SH, fpx, S, sh, tol) {
   const { alpha, cx, cz, L, W, H } = sh, ca = Math.cos(alpha), sa = Math.sin(alpha), m = .15;
   const nx = Math.ceil((L + 2 * m) / CELL), ny = Math.ceil((H + m) / CELL), nz = Math.ceil((W + 2 * m) / CELL);
   const a0 = -nx * CELL / 2, b0 = -nz * CELL / 2;
   const n = GRID, { R, Y } = S.box, near = morph3(S.occ, n, true), sure = morph3(morph3(S.occ, n, false), n, false);
-  const occ = new Uint8Array(nx * ny * nz), nv = cams.length, maxOut = Math.max(2, Math.round(nv * .07));
+  const occ = new Uint8Array(nx * ny * nz), nv = cams.length, maxOut = tol != null ? tol : Math.max(2, Math.round(nv * .07));
   const order = []; for (let s = 0; s < 8; s++) for (let i = s; i < nv; i += 8) order.push(i);
   for (let k = 0; k < nz; k++) { const b = b0 + (k + .5) * CELL;
     for (let j = 0; j < ny; j++) { const wy = (j + .5) * CELL; if (wy < .03) continue; const gy = Math.floor(wy / Y * n); if (gy >= n) continue;
@@ -403,6 +850,58 @@ export async function scanVideo(file, opts = {}) {
   }
 }
 
+// Photos prises en tournant autour de la voiture (v0.20) : même calcul qu'avec une vidéo, une image par photo, dans
+// l'ordre donné (celui des noms de fichiers). Le champ de l'appareil vient de la focale « équivalent 24 × 36 » de la photo
+// quand elle est indiquée (grand-angle 0,5× compris), sinon celui d'un téléphone en mode photo.
+export const MIN_PHOTOS = 16;
+function exifFocal35(buf) {
+  try { const v = new DataView(buf); if (v.getUint16(0) !== 0xFFD8) return 0; let o = 2;
+    while (o + 10 < v.byteLength) { const mk = v.getUint16(o), len = v.getUint16(o + 2);
+      if (mk === 0xFFE1 && v.getUint32(o + 4) === 0x45786966) { const t = o + 10, le = v.getUint16(t) === 0x4949, g16 = q => v.getUint16(t + q, le), g32 = q => v.getUint32(t + q, le);
+        const scan = (ifd, depth) => { if (depth > 2) return 0; const n = g16(ifd); for (let i = 0; i < n && i < 400; i++) { const e = ifd + 2 + i * 12, tag = g16(e);
+            if (tag === 0xA405) return g16(e + 8);
+            if (tag === 0x8769) { const r = scan(g32(e + 8), depth + 1); if (r) return r; } } return 0; };
+        return scan(g32(4), 0); }
+      if ((mk & 0xFF00) !== 0xFF00) break; o += 2 + len; }
+  } catch (e) {}
+  return 0;
+}
+async function framesOfPhotos(files, progress) {
+  const bigs = [], smalls = [], grays = [], times = []; let BW = 0, BH = 0, SH = 0, GW = 0, GH = 0, ar = 0, f35 = 0, big, gb, sm, gs, gc, gg;
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (!f35) try { f35 = exifFocal35(await file.slice(0, 196608).arrayBuffer()); } catch (e) {}
+    let bmp = null;
+    try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch (e) { bmp = await new Promise(res => { const u = URL.createObjectURL(file), im = new Image(); im.onload = () => { URL.revokeObjectURL(u); res(im); }; im.onerror = () => { URL.revokeObjectURL(u); res(null); }; im.src = u; }); }
+    if (!bmp) continue;
+    const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight;
+    if (!BW) { ar = w / h; BW = Math.min(1280, w); BH = Math.round(h * BW / w); SH = Math.round(h * WS / w);
+      big = document.createElement('canvas'); big.width = BW; big.height = BH; gb = big.getContext('2d');
+      sm = document.createElement('canvas'); sm.width = WS; sm.height = SH; gs = sm.getContext('2d', { willReadFrequently: true });
+      GW = Math.min(640, w); GH = Math.round(h * GW / w); gc = document.createElement('canvas'); gc.width = GW; gc.height = GH; gg = gc.getContext('2d', { willReadFrequently: true }); }
+    if (Math.abs(w / h / ar - 1) < .04) {                                  // une photo tournée autrement est laissée de côté
+      gb.drawImage(bmp, 0, 0, BW, BH); gs.drawImage(bmp, 0, 0, WS, SH); smalls.push(gs.getImageData(0, 0, WS, SH)); bigs.push(await toJpeg(big)); times.push(i);
+      gg.drawImage(bmp, 0, 0, GW, GH); grays.push(toGray(gg.getImageData(0, 0, GW, GH).data)); }
+    if (bmp.close) bmp.close(); progress && progress((i + 1) / files.length); if (i % 4 === 3) await tick();
+  }
+  if (bigs.length < MIN_PHOTOS) throw new Error('peu');
+  const lng = Math.max(ar, 1 / ar), half = lng > 1.45 && lng < 1.6 ? 18 : 17.3;   // 3:2 (appareil photo) ou 4:3 (téléphone)
+  const hfov = f35 > 8 ? clamp(2 * Math.atan(half / f35) * 180 / Math.PI, 30, 115) : HFOV + 2;
+  return { bigs, smalls, grays, times, SW: WS, SH, BW, BH, GW, GH, dur: bigs.length, hfov, photos: true };
+}
+export async function scanPhotos(files, opts = {}) {
+  const progress = opts.progress || (() => {});
+  progress('frames', 0);
+  const F = await framesOfPhotos(files, k => progress('frames', k));
+  try { return await scanFrames(F, opts, progress); }
+  catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e && e.message || e));
+    if (!err.spinFrames) { try { const n = F.bigs.length, idx = n <= N_TEX ? F.bigs.map((_, i) => i) : Array.from({ length: N_TEX }, (_, k) => Math.floor(k * n / N_TEX)); const sp = await spinOf(F, idx); err.spinFrames = sp.frames; err.spinSize = sp.size; } catch (e2) {} }
+    throw err;
+  }
+}
+
 // Images de la vue 360° : 960 px de large (les images du scan font jusqu'à 1280 px)
 async function spinOf(F, idxs) {
   if (F.BW <= 960) return { frames: idxs.map(i => F.bigs[i]), size: [F.BW, F.BH] };
@@ -416,8 +915,8 @@ const packMesh = mm => { const n = new Int8Array(mm.nrm.length), uv = new Uint16
   const r = { pos: mm.pos, nrm: n, uv, idx: mm.idx }; if (mm.glass) r.glass = mm.glass; return r; };
 
 async function scanFrames(F, opts, progress) {
-  const q = {};
-  const { SW, SH } = F, fpx = (Math.max(SW, SH) / 2) / Math.tan(HFOV / 2 * Math.PI / 180);
+  const q = {}, NF = F.smalls.length;                                   // 72 images d'une vidéo, ou les photos
+  const { SW, SH } = F, fpx = (Math.max(SW, SH) / 2) / Math.tan((F.hfov || HFOV) / 2 * Math.PI / 180);
   // Détourage
   progress('model', 0);
   let masks;
@@ -425,47 +924,47 @@ async function scanFrames(F, opts, progress) {
   else {
     const { seg, keep } = await loadSegmenter().catch(() => { throw new Error('modele'); });
     masks = [];
-    for (let i = 0; i < N_FRAMES; i++) {
+    for (let i = 0; i < NF; i++) {
       const res = seg.segment(F.smalls[i]), cm = res.categoryMask, cats = cm.getAsUint8Array(), mw = cm.width, mh = cm.height, raw = new Uint8Array(SW * SH);
       for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) { const c = cats[Math.min(mh - 1, (y * mh / SH) | 0) * mw + Math.min(mw - 1, (x * mw / SW) | 0)]; raw[y * SW + x] = keep.includes(c) ? 1 : 0; }
       try { res.close(); } catch (e) {}
       masks.push(cleanMask(raw, SW, SH));
-      progress('mask', (i + 1) / N_FRAMES); if (i % 6 === 5) await tick();
+      progress('mask', (i + 1) / NF); if (i % 6 === 5) await tick();
       // Pas de voiture sur le premier tiers du tour : inutile de continuer
-      if (i === 23) { const seen = masks.filter(m => maskStats(m, SW, SH).frac > .02).length; if (seen < 6) { const e = new Error('voiture'); e.quality = { carFrames: seen, frames: 24 }; throw e; } }
+      if (i === Math.floor(NF / 3) - 1) { const seen = masks.filter(m => maskStats(m, SW, SH).frac > .02).length; if (seen < Math.max(2, NF / 12)) { const e = new Error('voiture'); e.quality = { carFrames: seen, frames: i + 1 }; throw e; } }
     }
   }
   const stats = masks.map(m => maskStats(m, SW, SH));
   const ok = stats.map(s => s.frac > .02 && s.n > 0);
-  q.carFrames = ok.filter(Boolean).length; q.frames = N_FRAMES;
-  if (q.carFrames < N_FRAMES * .6) { const e = new Error('voiture'); e.quality = q; throw e; }
+  q.carFrames = ok.filter(Boolean).length; q.frames = NF;
+  if (q.carFrames < NF * .6) { const e = new Error('voiture'); e.quality = q; throw e; }
   // Angle parcouru, image après image
   progress('pose', 0);
   const spec = F.smalls.map((img, i) => bgSpectrum(img, dilate(masks[i], SW, SH, 6), SW, SH));
   const dxs = [], peaks = [];
-  for (let i = 1; i < N_FRAMES; i++) { const s = shiftBetween(spec[i - 1], spec[i]); dxs.push(s.dx); peaks.push(s.peak); if (i % 12 === 0) { progress('pose', i / N_FRAMES); await tick(); } }
+  for (let i = 1; i < NF; i++) { const s = shiftBetween(spec[i - 1], spec[i]); dxs.push(s.dx); peaks.push(s.peak); if (i % 12 === 0) { progress('pose', i / NF); await tick(); } }
   // le dernier pas (fin → début du tour) n'est pas mesuré : on prend la médiane
   const med = median(dxs), sgn = Math.sign(med) || 1;
   const steps = dxs.map((d, i) => { const bad = Math.sign(d) !== sgn || Math.abs(d) > Math.abs(med) * 4 || peaks[i] < 3; return bad ? med : d; });
   steps.push(med);
   const total = steps.reduce((a, b) => a + b, 0);
   q.peak = Math.round(median(peaks) * 10) / 10; q.badSteps = dxs.filter((d, i) => Math.sign(d) !== sgn || Math.abs(d) > Math.abs(med) * 4 || peaks[i] < 3).length;
-  const heading = [0]; for (let i = 1; i < N_FRAMES; i++) heading.push(heading[i - 1] + steps[i - 1] / Math.abs(total) * 2 * Math.PI);
+  const heading = [0]; for (let i = 1; i < NF; i++) heading.push(heading[i - 1] + steps[i - 1] / Math.abs(total) * 2 * Math.PI);
   const f0 = fpx;
   // Visée : on suppose que la voiture est gardée au milieu de l'écran (conseil affiché avant de filmer). Le centre de
   // la silhouette est faussé par la perspective et par les bords du cadre : sur la vidéo de test, s'y fier sculpte moins bien.
   // La visée réelle de chaque image est ensuite retrouvée par le recalage sur la silhouette, pour la peinture.
-  const xc = new Array(N_FRAMES).fill(0);
+  const xc = new Array(NF).fill(0);
   const yc = stats.map(s => s.cy - SH / 2);
   const theta = heading.map((h, i) => h - Math.atan(xc[i] / f0));
   // Distance : hauteur de la silhouette (images coupées en haut ou en bas : valeur des voisines)
   let dist = stats.map((s, i) => ok[i] && !s.cutT && !s.cutB ? f0 * CAR_H / s.h : null);
-  const fill = a => a.map((v, i) => { if (v != null) return v; for (let k = 1; k < N_FRAMES; k++) { const b = a[(i + k) % N_FRAMES], c = a[(i - k + N_FRAMES) % N_FRAMES]; if (b != null) return b; if (c != null) return c; } return 4; });
-  dist = fill(dist); dist = dist.map((_, i) => median([dist[(i - 1 + N_FRAMES) % N_FRAMES], dist[i], dist[(i + 1) % N_FRAMES]]));
-  const vis = []; for (let i = 0; i < N_FRAMES; i++) if (ok[i]) vis.push(i);
+  const fill = a => a.map((v, i) => { if (v != null) return v; for (let k = 1; k < NF; k++) { const b = a[(i + k) % NF], c = a[(i - k + NF) % NF]; if (b != null) return b; if (c != null) return c; } return 4; });
+  dist = fill(dist); dist = dist.map((_, i) => median([dist[(i - 1 + NF) % NF], dist[i], dist[(i + 1) % NF]]));
+  let vis = []; for (let i = 0; i < NF; i++) if (ok[i]) vis.push(i);
   const yawOf = i => Math.atan(xc[i] / f0), pitOf = i => Math.atan(yc[i] / f0);       // voiture vue à droite → caméra tournée à gauche
   const mk = off => vis.map(i => makeCam(theta[i], dist[i] + off(i), yawOf(i), pitOf(i)));
-  const dm = vis.map(i => dilate(masks[i], SW, SH, 2));
+  let dm = vis.map(i => dilate(masks[i], SW, SH, 2));
   // 1er passage : distance au centre ≈ distance au plus près + 1 m
   const sculpt = async (cams) => {
     const R = clamp(Math.min(...cams.map(c => Math.hypot(c.C[0], c.C[2]))) * .8, 1.8, 3.2), box = { R, Y: 2.4 };
@@ -480,21 +979,39 @@ async function scanFrames(F, opts, progress) {
   // Un seul passage : distance au centre ≈ distance tirée de la hauteur de la silhouette + 1 m. Des passages qui
   // corrigent la distance d'après la forme trouvée la font grossir d'un passage à l'autre (essayé sur la vidéo de test).
   let S = S1; const passes = [S1.shape];
-  let poses = vis.map(i => ({ theta: theta[i], d: dist[i] + 1, yaw: yawOf(i), pitch: pitOf(i), th: TARGET_H }));
+  let poses = vis.map(i => ({ theta: theta[i], d: dist[i] + 1, yaw: yawOf(i), pitch: pitOf(i), th: TARGET_H, h: CAM_H, roll: 0 }));
   if (opts.truePoses) {
-    const tp = opts.truePoses(F.times); poses = vis.map(i => ({ theta: tp[i].theta, d: tp[i].d, yaw: tp[i].yaw ?? yawOf(i), pitch: tp[i].pitch ?? pitOf(i), th: tp[i].th ?? TARGET_H }));
-    const Sn = await sculpt(poses.map(p => makeCam(p.theta, p.d, p.yaw, p.pitch, p.th))); if (Sn.shape) { S = Sn; passes.push(Sn.shape); }
+    const tp = opts.truePoses(F.times); poses = vis.map(i => ({ theta: tp[i].theta, d: tp[i].d, yaw: tp[i].yaw ?? yawOf(i), pitch: tp[i].pitch ?? pitOf(i), th: tp[i].th ?? TARGET_H, h: tp[i].h ?? CAM_H, roll: tp[i].roll ?? 0 }));
+    const Sn = await sculpt(poses.map(camOf)); if (Sn.shape) { S = Sn; passes.push(Sn.shape); }
   }
-  // Peinture : chaque caméra est recalée sur sa silhouette (angle, distance, assiette) pour que les images tombent au bon endroit
+  // Calage des caméras par les points de détail (v0.20) : position complète du téléphone pour chaque image. Gardé si la
+  // forme sculptée avec ces caméras colle au moins aussi bien aux silhouettes qu'avec l'estimation par le décor.
+  let calee = false;
+  if (!opts.truePoses && opts.sfm !== false && F.grays) {
+    progress('carve', .05);
+    let sf = null; try { sf = await sfmCameras(F, vis, poses, fpx * F.GW / SW, k => progress('carve', .05 + .7 * k)); } catch (e) { sf = { info: { refus: String(e && e.message || e).slice(0, 80) } }; }
+    q.calage = sf && sf.info;
+    if (sf && sf.poses) { const keep = sf.weak.map(w => !w), dm2 = dm.filter((_, j) => keep[j]), P2 = sf.poses.filter((_, j) => keep[j]), dmAll = dm;
+      dm = dm2; const S2 = await sculpt(P2.map(camOf)); dm = dmAll;
+      if (S2.shape && S2.shape.voxels >= 200) {
+        const img = new Uint8Array(SW * SH), acc = (S_, P_, D_) => { const pts = surfacePoints(S_.occ, GRID, S_.box, 4000); let t = 0; P_.forEach((p, j) => { t += silScore(camOf(p), D_[j], pts, SW, SH, fpx, img); }); return t / P_.length; };
+        const a = acc(S, poses, dm), b = acc(S2, P2, dm2); q.calage.silhouettes = [Math.round(a * 1000) / 1000, Math.round(b * 1000) / 1000];
+        if (b >= a - .02) { poses = P2; S = S2; passes.push(S2.shape); calee = true; vis = vis.filter((_, j) => keep[j]); dm = dm2; }
+        else q.calage.refus = 'silhouettes moins bien'; } }
+  }
+  q.calage = Object.assign(q.calage || {}, { garde: calee });
   progress('carve', .9);
-  const texPoses = opts.truePoses ? poses : refineCams(S.occ, GRID, S.box, poses, dm, SW, SH, fpx, ok, true);
-  const camsTex = texPoses.map(p => makeCam(p.theta, p.d, p.yaw, p.pitch, p.th));
-  vis.forEach((i, j) => { theta[i] = texPoses[j].theta; });
-  const finalPoses = texPoses;
+  const camsTex = poses.map(camOf);
+  vis.forEach((i, j) => { theta[i] = poses[j].theta; });
+  const finalPoses = poses, D1 = 180 / Math.PI;
+  q.camera = { visee: Math.round(median(poses.map(p => Math.abs(p.yaw))) * D1), roulis: Math.round(median(poses.map(p => Math.abs(p.roll))) * D1 * 10) / 10,
+    hauteur: Math.round(median(poses.map(p => p.h)) * 100) / 100 };
   q.passes = passes.map(p => [p.L, p.W, p.H].map(v => Math.round(v * 100) / 100));
-  // Forme fine (cubes de 2,5 cm) dans le repère de la voiture, avec les mêmes caméras que la forme grossière, puis symétrie
+  // Forme fine (cubes de 2,5 cm) dans le repère de la voiture, avec les caméras calées ; tolérance plus serrée une fois
+  // les caméras calées (une partie est retirée dès que 3 % des images la voient hors de la voiture), puis symétrie
   progress('carve', .93); await tick();
-  const fine = carveAligned(poses.map(p => makeCam(p.theta, p.d, p.yaw, p.pitch, p.th)), dm, SW, SH, fpx, S, S.shape);
+  const tolFine = opts.tolFix != null ? opts.tolFix : calee ? Math.max(1, Math.round(camsTex.length * (opts.tolFine ?? .03))) : undefined;
+  const fine = carveAligned(camsTex, dm, SW, SH, fpx, S, S.shape, tolFine);
   const { nx, ny, nz } = fine, fo = largestComp3(fine.occ, nx, ny, nz);
   q.fine = { roofCut: flattenRoof(fo, nx, ny, nz) };
   const ff = new Float32Array(fo.length); let fv = 0; for (let i = 0; i < ff.length; i++) { ff[i] = fo[i]; fv += fo[i]; }
@@ -533,7 +1050,7 @@ async function scanFrames(F, opts, progress) {
   const spin = await spinOf(F, picks.map(j => vis[j]));
   q.loopDeg = 360; q.views = vis.length;
   const common = { date: new Date().toISOString(), align, dims, paint, roof, quality: q, spinFrames: spin.frames, spinSize: spin.size,
-    debug: opts.debug ? { poses: finalPoses, heading, ctimes: F.times, top: (() => { const n = GRID, t = new Array(n * n).fill(0); for (let i = 0; i < S.occ.length; i++) if (S.occ[i]) { const x = i % n, z = (i / (n * n)) | 0; t[z * n + x] = 1; } return t; })(), side: (() => { const n = GRID, t = new Array(n * n).fill(0); for (let i = 0; i < S.occ.length; i++) if (S.occ[i]) { const x = i % n, y = ((i / n) | 0) % n; t[(n - 1 - y) * n + x] = 1; } return t; })(), times: F.times, theta, dist, stats, ok, steps, dxs, peaks, vis, masks: [0, 9, 18, 27].map(i => Array.from(masks[i])), SW, SH } : undefined };
+    debug: opts.debug ? { poses: finalPoses, heading, ctimes: F.times, top: (() => { const n = GRID, t = new Array(n * n).fill(0); for (let i = 0; i < S.occ.length; i++) if (S.occ[i]) { const x = i % n, z = (i / (n * n)) | 0; t[z * n + x] = 1; } return t; })(), side: (() => { const n = GRID, t = new Array(n * n).fill(0); for (let i = 0; i < S.occ.length; i++) if (S.occ[i]) { const x = i % n, y = ((i / n) | 0) % n; t[(n - 1 - y) * n + x] = 1; } return t; })(), times: F.times, theta, dist, stats, ok, steps, dxs, peaks, vis, masks: (opts.debugAll ? masks.map((_, i) => i) : [0, 9, 18, 27].filter(i => i < masks.length)).map(i => Array.from(masks[i])), SW, SH } : undefined };
   // v0.19 : maillage calculé une fois, texture « cuite » sur la carte graphique (toutes les images, visibilité, exposition)
   if (!opts.noBake) try {
     const THREE = await import('three'), MC = await import('three/addons/objects/MarchingCubes.js');

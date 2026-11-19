@@ -37,6 +37,8 @@ Ce que fait le script :
   puis une vidéo de synthèse d'une voiture filmée en tournant (outils/video-de-test.py, 150 images) doit donner la voiture
   en 3D : proportions proches de la vraie, gardée dans IndexedDB (magasin « scan »), affichée sur l'accueil, dans Santé
   et au Garage à la place du dessin, interrupteur « Montrer ma voiture scannée », et toujours là après rechargement ;
+- (v0.20) scan par photos : 40 photos tirées de la même vidéo (une tous les 9° environ) doivent aussi donner la voiture en
+  3D, aux bonnes proportions ; le calage des caméras par les points de détail est noté dans report.json (gardé ou non) ;
 - écrit report.json et contact.jpg (planche de captures à regarder une fois).
 Code de sortie 1 s'il y a une erreur JavaScript.
 """
@@ -452,6 +454,26 @@ async def scan3d(pg):
         await pg.click('#scanSw label.switch', force=True)
         try: await pg.wait_for_function(SCAN_STATE + " === 'affichée'", timeout=40000)
         except Exception: errors.append('contrôle : la voiture scannée ne revient pas quand on la remontre')
+        # v0.20 : scan à partir de 40 photos tirées de la même vidéo (une tous les 9° environ)
+        phd = os.path.join(OUT, 'scan-photos'); os.makedirs(phd, exist_ok=True)
+        for f in os.listdir(phd): os.remove(os.path.join(phd, f))
+        subprocess.run(['ffmpeg', '-v', 'error', '-i', os.path.join(d, 'tour-synthetique.mp4'), '-vf', 'fps=4/3', '-q:v', '3', os.path.join(phd, 'IMG_%03d.jpg')], check=True, timeout=180)
+        pics = sorted(os.path.join(phd, f) for f in os.listdir(phd))
+        await goto_tab(pg, 'car'); t1 = time.time()
+        await pg.set_input_files('#spinPics', pics)
+        await pg.wait_for_function("window.VigieSpin && !window.VigieSpin.state().busy && window.VigieSpin.state().src === 'photos'", timeout=300000)
+        st2 = await pg.evaluate("() => Object.assign(window.VigieSpin.state(), {err: document.querySelector('#spinErr').textContent})")
+        q2 = st2['scanQ'] or {}
+        scan_3d['photos'] = {'nombre': len(pics), 'duree_s': round(time.time() - t1, 1), 'modele_3d': bool(st2['scan']), 'note': st2['scanNote'], 'calage': q2.get('calage'), 'vues': q2.get('views')}
+        if st2['err']: errors.append('contrôle : scan par photos refusé : ' + st2['err'])
+        if not st2['scan']: errors.append('contrôle : pas de voiture en 3D après 40 photos de la vidéo de test : ' + (st2['scanNote'] or '?'))
+        else:
+            dm = st2['scanDims']; lh, wh = dm['L'] / dm['H'], dm['W'] / dm['H']
+            scan_3d['photos']['proportions'] = {'longueur_sur_hauteur': [round(lh, 2), round(tlh, 2)], 'largeur_sur_hauteur': [round(wh, 2), round(twh, 2)]}
+            if abs(lh / tlh - 1) > .15 or abs(wh / twh - 1) > .2:
+                errors.append(f"contrôle : la voiture scannée avec des photos n'a pas les bonnes proportions (L/H {lh:.2f} au lieu de {tlh:.2f}, l/H {wh:.2f} au lieu de {twh:.2f})")
+            try: await pg.wait_for_function(SCAN_STATE + " === 'affichée'", timeout=40000)
+            except Exception: errors.append('contrôle : la voiture scannée avec des photos ne s\'affiche pas')
     except Exception as e:
         errors.append('contrôle : scan 3D bloqué : ' + str(e).splitlines()[0][:140])
 
