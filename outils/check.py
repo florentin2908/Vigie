@@ -21,6 +21,7 @@ Ce que fait le script :
 - visite chaque rubrique à 390x844 puis à 1280x720 ;
 - clique chaque bouton visible de chaque rubrique (test de fumée) ;
 - repère les débordements horizontaux ;
+- tuto de scan (v0.22) : ouverture au premier scan, 5 étapes, caméra, Échap, sans animation ; bilan du tournage ;
 - recharge la page et vérifie la sauvegarde (le premier lancement ne revient pas, prénom, couleur, pleins et photo conservés) ;
 - mesure l'animation de lancement (images dessinées et plus long arrêt entre le début de l'animation et la fin du lancement) ;
 - vérifie la pastille « Exemple » (semaine, trajets) sans boîtier et la pastille d'état qui se cache quand on descend sur téléphone ;
@@ -172,7 +173,7 @@ async def smoke(pg, tab):
         except Exception as e:
             errors.append(f'clic impossible [{tab}] « {label} » : {str(e).splitlines()[0][:120]}')
         await pg.wait_for_timeout(450)
-        await pg.evaluate("() => { for (const id of ['#sheet', '#onboard']) { const s = document.querySelector(id); if (s) s.classList.remove('open'); } if (window.VigieRadio) window.VigieRadio.close(); }")
+        await pg.evaluate("() => { for (const id of ['#sheet', '#onboard', '#scanTuto']) { const s = document.querySelector(id); if (s) s.classList.remove('open'); } if (window.VigieRadio) window.VigieRadio.close(); }")
         clicked.append(f'{tab}: {label}' + ('  ← ERREUR' if len(errors) > before else ''))
 
 async def onboarding(pg):
@@ -331,6 +332,53 @@ IDB_JS = """() => new Promise(r => {
   q.onerror = () => r(null);
 })"""
 
+TUTO_JS = """() => { const card = document.querySelector('#scanTuto .ob-card'), c = card.getBoundingClientRect(), bad = [];
+  if (c.left < -1 || c.right > innerWidth + 1 || c.top < -1 || c.bottom > innerHeight + 1) bad.push('carte du tuto hors de l\u2019écran');
+  for (const el of document.querySelectorAll('#scanTuto .tu-step.on *, #scanTuto .ob-nav *, #scanTuto .ob-top *')) { if (el.closest('svg')) continue; const r = el.getBoundingClientRect();
+    if (r.width && (r.right > c.right + 1 || r.left < c.left - 1)) bad.push((el.id ? '#' + el.id : el.tagName.toLowerCase() + '.' + [...el.classList].join('.')) + ' dépasse de la carte'); }
+  return { count: document.querySelector('#tuCount').textContent, bad: bad.slice(0, 6) }; }"""
+
+async def scan_tuto(pg):
+    # v0.22 : tuto « Bien scanner ta voiture » : s'ouvre au tout premier « Scanner ma voiture », 5 étapes sans débordement,
+    # la dernière lance la caméra ; « Comment bien filmer » le rouvre, Échap le ferme ; sans animation, téléphones fixes
+    try:
+        await goto_tab(pg, 'car')
+        await pg.evaluate("document.querySelector('#spinCard').scrollIntoView({block: 'center'})"); await pg.wait_for_timeout(400)
+        await pg.click('#spinFilm', force=True); await pg.wait_for_timeout(700)
+        if not await pg.evaluate("document.querySelector('#scanTuto').classList.contains('open')"):
+            errors.append("contrôle : le tuto de scan ne s'ouvre pas au premier « Scanner ma voiture »"); return
+        seen = []
+        for i in range(5):
+            st = await pg.evaluate(TUTO_JS); seen.append(st['count'])
+            for o in st['bad']: overflow.append(f'390px [tuto, étape {i + 1}] {o}')
+            if i in (0, 2, 3, 4): await snap(pg, f'tel_tuto_{i + 1}')
+            if i < 4: await pg.click('#tuNext'); await pg.wait_for_timeout(350)
+        if seen != [f'Étape {k} sur 5' for k in range(1, 6)]: errors.append(f'contrôle : étapes du tuto inattendues : {seen}')
+        if (await pg.inner_text('#tuNext')).strip() != 'Filmer maintenant': errors.append("contrôle : la dernière étape du tuto ne propose pas « Filmer maintenant »")
+        try:
+            async with pg.expect_file_chooser(timeout=5000) as fc:
+                await pg.click('#tuNext')
+            await fc.value   # la caméra (capture="environment") ; le banc referme le sélecteur sans fichier
+        except Exception:
+            errors.append("contrôle : « Filmer maintenant » n'ouvre pas la caméra")
+        st = await pg.evaluate("() => ({open: document.querySelector('#scanTuto').classList.contains('open'), seen: localStorage.getItem('vigie.scanTuto')})")
+        if st['open']: errors.append("contrôle : le tuto reste ouvert après « Filmer maintenant »")
+        if st['seen'] != '1': errors.append("contrôle : le tuto vu n'est pas retenu")
+        await pg.emulate_media(reduced_motion='reduce')
+        await pg.click('#spinHow', force=True); await pg.wait_for_timeout(500)
+        if not await pg.evaluate("document.querySelector('#scanTuto').classList.contains('open')"): errors.append("contrôle : « Comment bien filmer » n'ouvre pas le tuto")
+        for _ in range(3): await pg.click('#tuNext'); await pg.wait_for_timeout(200)
+        m = await pg.evaluate("() => [getComputedStyle(document.querySelector('.tu-moving')).display, getComputedStyle(document.querySelector('.tu-ghost')).display]")
+        if m != ['none', 'inline']: errors.append(f'contrôle : tuto sans animation : le tour reste animé ({m})')
+        await pg.keyboard.press('Escape'); await pg.wait_for_timeout(300)
+        if await pg.evaluate("document.querySelector('#scanTuto').classList.contains('open')"): errors.append('contrôle : Échap ne ferme pas le tuto')
+        await pg.emulate_media(reduced_motion='no-preference')
+        scan_3d['tuto'] = {'etapes': len(seen), 'ouvert_au_premier_scan': True}
+    except Exception as e:
+        errors.append('contrôle : tuto de scan bloqué : ' + str(e).splitlines()[0][:140])
+
+SCAN_TIPS_JS = "() => { const b = document.querySelector('#scanTips'); return b && !b.hidden ? [...b.querySelectorAll('li')].map(l => l.textContent) : []; }"
+
 async def spin360(pg):
     vid = os.path.join(OUT, 'tour-test.mp4')
     try:
@@ -430,6 +478,8 @@ async def scan3d(pg):
         if abs(lh / tlh - 1) > .15 or abs(wh / twh - 1) > .2:
             errors.append(f"contrôle : la voiture scannée n'a pas les bonnes proportions (L/H {lh:.2f} au lieu de {tlh:.2f}, l/H {wh:.2f} au lieu de {twh:.2f})")
         if q.get('carFrames', 0) < 60: errors.append(f"contrôle : voiture reconnue sur {q.get('carFrames')} images sur 72 seulement")
+        tips = await pg.evaluate(SCAN_TIPS_JS); scan_3d['conseils'] = tips   # v0.22 : bilan du tournage
+        if tips: errors.append('contrôle : la vidéo de test, bien filmée, reçoit des conseils de tournage : ' + ' / '.join(tips)[:240])
         # v0.19 : maillage + texture cuite (v3) ; le repli v2 (champ + planche de vues) n'est attendu que sans WebGL 2
         if not db or db.get('version') != 3 or (db.get('triangles') or 0) < 50000 or db.get('texture') != 'image/jpeg' or (db.get('texture_ko') or 0) < 100 or not db.get('vitres') or db.get('roues') != 4:
             errors.append(f'contrôle : le scan 3D n\'est pas gardé comme prévu dans IndexedDB (maillage et texture cuite) : {db}')
@@ -465,6 +515,9 @@ async def scan3d(pg):
         st2 = await pg.evaluate("() => Object.assign(window.VigieSpin.state(), {err: document.querySelector('#spinErr').textContent})")
         q2 = st2['scanQ'] or {}
         scan_3d['photos'] = {'nombre': len(pics), 'duree_s': round(time.time() - t1, 1), 'modele_3d': bool(st2['scan']), 'note': st2['scanNote'], 'calage': q2.get('calage'), 'vues': q2.get('views')}
+        tips2 = await pg.evaluate(SCAN_TIPS_JS); scan_3d['photos']['conseils'] = tips2
+        if st2['scan'] and (q2.get('calage') or {}).get('garde') is False and not any('photos' in t for t in tips2):
+            errors.append('contrôle : calage refusé avec les photos, mais aucun conseil de tournage affiché')
         if st2['err']: errors.append('contrôle : scan par photos refusé : ' + st2['err'])
         if not st2['scan']: errors.append('contrôle : pas de voiture en 3D après 40 photos de la vidéo de test : ' + (st2['scanNote'] or '?'))
         else:
@@ -634,6 +687,7 @@ async def main():
         await body_and_photo(pg)
         await demo_scenarios(pg)
         await carnet(pg)
+        await scan_tuto(pg)
         await spin360(pg)
         await scan3d(pg)
         T = await tabs(pg)

@@ -1224,10 +1224,10 @@ body.ev .fuel-only{display:none}
 #fuelChart .label{display:block;margin-bottom:4px}
 
 /* ---------- Premier lancement guidé ---------- */
-#onboard{position:fixed;inset:0;z-index:42;display:flex;align-items:center;justify-content:center;padding:calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));background:rgba(3,6,14,.55);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .4s,visibility .4s}
-#onboard.open{opacity:1;visibility:visible;pointer-events:auto}
+#onboard,#scanTuto{position:fixed;inset:0;z-index:42;display:flex;align-items:center;justify-content:center;padding:calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));background:rgba(3,6,14,.55);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .4s,visibility .4s}
+#onboard.open,#scanTuto.open{opacity:1;visibility:visible;pointer-events:auto}
 .ob-card{width:min(440px,100%);max-height:100%;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:14px;background:linear-gradient(145deg,rgba(40,48,70,.9),rgba(20,26,40,.9));transform:translateY(24px) scale(.98);transition:transform .55s var(--ease);outline:none;scrollbar-width:none}
-#onboard.open .ob-card{transform:none}
+#onboard.open .ob-card,#scanTuto.open .ob-card{transform:none}
 .ob-top{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:30px}
 .ob-prog{display:flex;align-items:center;gap:10px}
 .ob-dots{display:flex;gap:6px;align-items:center}
@@ -1246,6 +1246,61 @@ body.ev .fuel-only{display:none}
 .fields .full{grid-column:1/-1}
 .ob-nav{display:flex;gap:10px}
 .ob-nav .btn{flex:1}
+
+/* ---------- Tuto « Bien scanner ta voiture » (v0.22) ---------- */
+.tu-card{width:min(480px,100%);touch-action:pan-y}
+.tu-fig{margin:0;border-radius:18px;background:radial-gradient(120% 95% at 50% 0%,rgba(var(--acc-rgb),.16),rgba(255,255,255,.03) 72%);border:1px solid rgba(255,255,255,.1);overflow:hidden}
+.tu-fig svg{display:block;width:100%;height:auto}
+.tu-fig text{font:700 11px var(--font);fill:var(--ink)}
+.tu-fig text.m{fill:var(--muted);font-weight:600}
+.tu-fig .ln{stroke:rgba(255,255,255,.12);stroke-width:1;fill:none}
+.tu-fig .zone{fill:rgba(var(--acc-rgb),.08);stroke:var(--accent);stroke-width:1.5;stroke-dasharray:6 6}
+.tu-fig .route{fill:none;stroke:var(--accent);stroke-width:2;stroke-dasharray:2 7;stroke-linecap:round;opacity:.8}
+.tu-fig .chev{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tu-fig .dim{fill:none;stroke:var(--ink);stroke-width:1.2;opacity:.75}
+.tu-fig .gnd{stroke:rgba(255,255,255,.3);stroke-width:1.5}
+.tu-fig .body{fill:#DCE5F4}
+.tu-fig .win{fill:#17233a}
+.tu-fig .roof{fill:#C9D4E8}
+.tu-fig .tire{fill:#0b0d12;stroke:rgba(255,255,255,.35);stroke-width:1}
+.tu-fig .hub{fill:#9aa6ba}
+.tu-fig .acc{fill:var(--accent)}
+.tu-fig .phone{fill:#0c1220;stroke:var(--ink);stroke-width:1.5}
+.tu-fig .scr{fill:#05080f;stroke:rgba(255,255,255,.55);stroke-width:1.5}
+.tu-fig .brk{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round}
+.tu-fig .tile{fill:rgba(255,255,255,.05);stroke:rgba(255,255,255,.12)}
+.tu-fig .cloud{fill:#E8EEF8}
+.tu-fig .sun{fill:var(--warn)}
+.tu-fig .ray{stroke:var(--warn);stroke-width:2.5;stroke-linecap:round}
+.tu-fig .moon{fill:#C9D4E8}
+.tu-fig .drop{stroke:#7FA7D9;stroke-width:2;stroke-linecap:round}
+.tu-fig .ok{fill:rgba(50,215,75,.18)}.tu-fig .okt{fill:var(--ok)}
+.tu-fig .wa{fill:rgba(255,159,10,.18)}.tu-fig .wat{fill:var(--warn)}
+.tu-fig .ko{fill:rgba(255,69,58,.18)}.tu-fig .kot{fill:var(--bad)}
+.tu-fig .cone{fill:url(#tuConeV)}
+.tu-fig .c0{stop-color:var(--accent);stop-opacity:.5}.tu-fig .c1{stop-color:var(--accent);stop-opacity:0}
+.tu-ghost{display:none}
+@media (prefers-reduced-motion: reduce){.tu-moving{display:none}.tu-ghost{display:inline}}
+.tu-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+.tu-list li{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.4}
+.tu-list li::before{content:"";flex:none;width:20px;height:20px;border-radius:50%;background:rgba(50,215,75,.16) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='%2332D74B' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/12px no-repeat}
+.tu-list li.no::before{background:rgba(255,69,58,.16) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3.2 3.2l5.6 5.6M8.8 3.2l-5.6 5.6' fill='none' stroke='%23FF453A' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center/11px no-repeat}
+.tu-check{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px;counter-reset:t}
+.tu-check li{display:flex;gap:12px;align-items:center;padding:11px 12px;border-radius:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);font-size:14.5px;font-weight:700;line-height:1.3}
+.tu-check li::before{counter-increment:t;content:counter(t);flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:800;background:rgba(var(--acc-rgb),.2);color:var(--accent)}
+.tu-alt{display:flex;flex-wrap:wrap;gap:8px}
+.tu-alt .btn{flex:1 1 150px}
+.tu-open{-webkit-appearance:none;appearance:none;display:flex;align-items:center;gap:12px;width:100%;padding:11px 12px;border-radius:16px;border:1px solid rgba(var(--acc-rgb),.35);background:rgba(var(--acc-rgb),.1);color:var(--ink);font:inherit;text-align:left;cursor:pointer;transition:background .3s}
+.tu-open:hover{background:rgba(var(--acc-rgb),.18)}
+.tu-open .tu-play{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;flex:none;background:var(--accent);color:#04121c}
+.tu-open .tu-play svg{width:16px;height:16px}
+.tu-open b{display:block;font-size:14.5px}
+.tu-open small{display:block;font-size:12.5px;color:var(--muted);font-weight:600;margin-top:1px}
+.tu-advice{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:16px;background:rgba(255,159,10,.08);border:1px solid rgba(255,159,10,.3)}
+.tu-advice b{font-size:14px}
+.tu-advice ul{margin:0;padding-left:18px;font-size:14px;line-height:1.45}
+.tu-advice li{margin:2px 0}
+.tu-advice .linkbtn{-webkit-appearance:none;appearance:none;align-self:flex-start;border:0;background:none;padding:2px 0;color:var(--accent);font:inherit;font-size:14px;font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 
 /* ===================== Démarrage v0.12 : face avant, titre, « Bonjour » ===================== */
 .veil{position:absolute;inset:0;background:#05040f;pointer-events:none;transition:opacity 1.4s ease}
@@ -1787,15 +1842,16 @@ body.radio-on .shell{visibility:hidden}
       <div id="spinEmpty">
         <p class="note">Filme un tour complet de ta vraie voiture : Vigie la scanne et la refait en vraie 3D, avec ses propres couleurs. Elle remplace le dessin Vigie sur l'accueil, dans Santé, ici et en mode autoradio. Tout se calcule sur ce téléphone : la vidéo n'est jamais envoyée.</p>
         <ul class="tips">
-          <li>Un tour complet, en 20 à 30 secondes, à pas lents et réguliers.</li>
-          <li>Téléphone à l'horizontale, à hauteur des phares.</li>
-          <li>À environ 3 m de la voiture : elle reste entière et au milieu de l'écran.</li>
-          <li>De jour, sans autre voiture collée à la tienne.</li>
-          <li>Avec des photos : 40 ou plus, une à chaque pas, toutes à la même hauteur. Dès 16 photos, Vigie tente aussi la 3D ; une vidéo reste le plus sûr.</li>
+          <li>Un endroit dégagé, de jour (un ciel couvert est idéal).</li>
+          <li>Téléphone à l'horizontale, à hauteur des phares, à environ 3 m.</li>
+          <li>Toute la voiture dans l'image, au milieu de l'écran.</li>
+          <li>Un tour complet en 20 à 40 secondes, à pas réguliers, sans t'arrêter.</li>
         </ul>
       </div>
+      <button class="tu-open" id="spinHow" type="button"><span class="tu-play" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg></span><span><b>Comment bien filmer ta voiture</b><small>Le tuto en 5 étapes illustrées, 1 minute</small></span></button>
       <p class="note" id="spinInfo" hidden>—</p>
       <p class="note" id="scanInfo" hidden>—</p>
+      <div class="tu-advice" id="scanTips" hidden><b>Pour un scan encore plus fidèle</b><ul id="scanTipsL"></ul><button class="linkbtn" id="scanTipsTuto" type="button">Revoir le tuto</button></div>
       <div class="field" id="scanSw" hidden><span class="flab" id="scan-on-l">Sur l'accueil, dans Santé et en mode autoradio</span><label class="switch"><input id="scan-on" type="checkbox" checked aria-labelledby="scan-on-l"><i aria-hidden="true"></i><span id="scan-on-t">Montrer ma voiture scannée en 3D</span></label></div>
       <div class="spin-prog" id="spinProg" hidden><div class="bar"><i id="spinBar"></i></div><span class="label" id="spinProgT">Préparation…</span></div>
       <input type="file" id="spinCam" accept="video/*" capture="environment" hidden>
@@ -1997,6 +2053,71 @@ body.radio-on .shell{visibility:hidden}
     <div class="ob-nav">
       <button class="btn ghost" id="obBack" type="button" hidden>Retour</button>
       <button class="btn" id="obNext" type="button">Suivant</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Tuto : bien scanner ta voiture (v0.22) ===== -->
+<div id="scanTuto" role="dialog" aria-modal="true" aria-labelledby="tuT0" aria-hidden="true">
+  <div class="glass ob-card tu-card" tabindex="-1">
+    <div class="ob-top">
+      <div class="ob-prog"><div class="ob-dots" aria-hidden="true"><i class="on"></i><i></i><i></i><i></i><i></i></div><span class="label" id="tuCount">Étape 1 sur 5</span></div>
+      <button class="ob-skip" id="tuClose" type="button">Fermer</button>
+    </div>
+    <div class="ob-step tu-step on" data-step="0">
+      <figure class="tu-fig" aria-hidden="true"><svg viewBox="0 0 320 180"><path class="ln" d="M24 0V180M296 0V180"/><rect class="zone" x="42" y="14" width="236" height="152" rx="52"/><g transform="translate(110,67)"><rect class="tire" x="14" y="-2" width="15" height="7" rx="2"/><rect class="tire" x="70" y="-2" width="15" height="7" rx="2"/><rect class="tire" x="14" y="41" width="15" height="7" rx="2"/><rect class="tire" x="70" y="41" width="15" height="7" rx="2"/><rect class="body" x="0" y="2" width="100" height="42" rx="14"/><rect class="win" x="28" y="7" width="48" height="32" rx="9"/><rect class="roof" x="37" y="9" width="28" height="28" rx="5"/><rect class="acc" x="96" y="8" width="3" height="7" rx="1.5"/><rect class="acc" x="96" y="31" width="3" height="7" rx="1.5"/></g><path class="dim" d="M214 90H274M220 86l-6 4 6 4M268 86l6 4-6 4"/><text x="244" y="83" text-anchor="middle">3 m</text><path class="dim" d="M160 63V18M156 57l4 6 4-6M156 24l4-6 4 6"/><text x="167" y="44">3 m</text><text class="m" x="160" y="146" text-anchor="middle">Rien dans cette zone</text></svg></figure>
+      <h2 class="ob-t" id="tuT0">Le bon endroit</h2>
+      <p class="ob-lead">Il te faut de la place pour faire tout le tour de ta voiture, à environ 3 mètres d'elle : un parking peu rempli, une cour, une rue calme.</p>
+      <ul class="tu-list"><li>Sol plat et dégagé tout autour</li><li class="no">Pas d'autre voiture, de mur ou de vélo collé à la tienne</li><li class="no">Personne ne passe entre toi et ta voiture</li></ul>
+    </div>
+    <div class="ob-step tu-step" data-step="1" aria-hidden="true">
+      <figure class="tu-fig" aria-hidden="true"><svg viewBox="0 0 320 150"><rect class="tile" x="8" y="10" width="96" height="130" rx="14"/><rect class="tile" x="112" y="10" width="96" height="130" rx="14"/><rect class="tile" x="216" y="10" width="96" height="130" rx="14"/>
+        <g transform="translate(54,50)"><circle class="cloud" cx="-9" cy="3" r="9"/><circle class="cloud" cx="4" cy="-4" r="12"/><circle class="cloud" cx="15" cy="4" r="8"/><rect class="cloud" x="-18" y="3" width="41" height="10" rx="5"/></g>
+        <g transform="translate(160,50)"><circle class="sun" r="10"/><path class="ray" d="M0-15V-21M0 15V21M-15 0H-21M15 0H21M-10.6-10.6l-4.2-4.2M10.6 10.6l4.2 4.2M-10.6 10.6l-4.2 4.2M10.6-10.6l4.2-4.2"/></g>
+        <g transform="translate(264,46)"><path class="moon" d="M5-13A13 13 0 1 0 5 13A10 10 0 1 1 5-13Z"/><path class="drop" d="M-12 22l-3 6M0 22l-3 6M12 22l-3 6"/></g>
+        <text x="56" y="94" text-anchor="middle">Ciel couvert</text><text x="160" y="94" text-anchor="middle">Plein soleil</text><text x="264" y="94" text-anchor="middle">Nuit ou pluie</text>
+        <rect class="ok" x="26" y="106" width="60" height="20" rx="10"/><text class="okt" x="56" y="120" text-anchor="middle">Idéal</text>
+        <rect class="wa" x="122" y="106" width="76" height="20" rx="10"/><text class="wat" x="160" y="120" text-anchor="middle">Attention</text>
+        <rect class="ko" x="236" y="106" width="56" height="20" rx="10"/><text class="kot" x="264" y="120" text-anchor="middle">Non</text></svg></figure>
+      <h2 class="ob-t" id="tuT1">La bonne lumière</h2>
+      <p class="ob-lead">Filme de jour. Un ciel couvert est idéal : ta voiture garde ses vraies couleurs, presque sans reflets.</p>
+      <ul class="tu-list"><li>En plein soleil, place-toi pour que ton ombre ne tombe pas sur la voiture</li><li>Portes, coffre et vitres fermés, phares éteints ; une voiture propre a de plus belles couleurs</li><li class="no">Pas la nuit, ni sous la pluie, ni dans un parking sombre</li></ul>
+    </div>
+    <div class="ob-step tu-step" data-step="2" aria-hidden="true">
+      <figure class="tu-fig" aria-hidden="true"><svg viewBox="0 0 320 180"><defs><linearGradient id="tuConeH" x1="0" y1="0" x2="1" y2="0"><stop offset="0" class="c0"/><stop offset="1" class="c1"/></linearGradient></defs>
+        <path d="M64 120L306 82V164Z" style="fill:url(#tuConeH)"/><path class="gnd" d="M8 158H312"/><path class="body" d="M160 146L160 128Q160 118 170 116L196 113Q212 97 232 94L268 94Q284 96 294 112L300 120Q305 126 304 138L303 146Z"/><path class="win" d="M205 112Q217 101 233 98L265 98Q278 100 286 112Z"/><path class="ln" d="M246 98V112" style="stroke:rgba(220,229,244,.8);stroke-width:2"/><rect class="acc" x="296" y="117" width="7" height="4" rx="2"/><circle class="tire" cx="186" cy="145" r="13"/><circle class="hub" cx="186" cy="145" r="5"/><circle class="tire" cx="280" cy="145" r="13"/><circle class="hub" cx="280" cy="145" r="5"/>
+        <path class="route" d="M66 120H294"/>
+        <g transform="translate(49,120)"><rect class="phone" x="-15" y="-8" width="30" height="16" rx="3"/><circle class="acc" cx="10" cy="0" r="2.2"/></g>
+        <path class="dim" d="M22 156V124M18 150l4 6 4-6M18 130l4-6 4 6"/><text x="28" y="146">80 cm</text>
+        <path class="dim" d="M66 176H158M72 172l-6 4 6 4M152 172l6 4-6 4"/><text x="112" y="170" text-anchor="middle">≈ 3 m</text>
+        <rect class="scr" x="10" y="10" width="124" height="70" rx="10"/><g transform="translate(-44 -18) scale(.5)"><path class="body" d="M160 146L160 128Q160 118 170 116L196 113Q212 97 232 94L268 94Q284 96 294 112L300 120Q305 126 304 138L303 146Z"/><path class="win" d="M205 112Q217 101 233 98L265 98Q278 100 286 112Z"/><path class="ln" d="M246 98V112" style="stroke:rgba(220,229,244,.8);stroke-width:2"/><rect class="acc" x="296" y="117" width="7" height="4" rx="2"/><circle class="tire" cx="186" cy="145" r="13"/><circle class="hub" cx="186" cy="145" r="5"/><circle class="tire" cx="280" cy="145" r="13"/><circle class="hub" cx="280" cy="145" r="5"/></g><path class="brk" d="M22 26V20H30M122 26V20H114M22 64V70H30M122 64V70H114"/>
+        <text class="m" x="72" y="96" text-anchor="middle">Toute la voiture, au milieu</text></svg></figure>
+      <h2 class="ob-t" id="tuT2">Tiens bien ton téléphone</h2>
+      <p class="ob-lead">À l'horizontale, à hauteur des phares (environ 80 cm du sol), sans zoomer. Toute ta voiture tient dans l'image, roues comprises, avec un peu de marge.</p>
+      <ul class="tu-list"><li>La voiture reste au milieu de l'écran, du début à la fin</li><li>Environ 3 m entre toi et la carrosserie</li><li class="no">Pas de téléphone à la verticale, pas de zoom</li></ul>
+    </div>
+    <div class="ob-step tu-step" data-step="3" aria-hidden="true">
+      <figure class="tu-fig" aria-hidden="true"><svg viewBox="0 0 320 190"><defs><linearGradient id="tuConeV" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="c0"/><stop offset="1" class="c1"/></linearGradient></defs>
+        <path class="route" d="M206 26A52 52 0 0 1 258 78V122A52 52 0 0 1 206 174H114A52 52 0 0 1 62 122V78A52 52 0 0 1 114 26Z"/><path class="chev" d="M157 21l6 5-6 5M253 97l5 6 5-6M163 169l-6 5 6 5M57 103l5-6 5 6"/>
+        <g transform="translate(110,77)"><rect class="tire" x="14" y="-2" width="15" height="7" rx="2"/><rect class="tire" x="70" y="-2" width="15" height="7" rx="2"/><rect class="tire" x="14" y="41" width="15" height="7" rx="2"/><rect class="tire" x="70" y="41" width="15" height="7" rx="2"/><rect class="body" x="0" y="2" width="100" height="42" rx="14"/><rect class="win" x="28" y="7" width="48" height="32" rx="9"/><rect class="roof" x="37" y="9" width="28" height="28" rx="5"/><rect class="acc" x="96" y="8" width="3" height="7" rx="1.5"/><rect class="acc" x="96" y="31" width="3" height="7" rx="1.5"/></g>
+        <path class="dim" d="M206 26V9"/><path class="acc" d="M206 9L219 13L206 17Z"/><text x="223" y="17">Départ = arrivée</text>
+        <text class="m" x="160" y="150" text-anchor="middle">Un tour en 20 à 40 s</text>
+        <g class="tu-moving"><g><path class="cone" d="M0 3L-17 40H17Z"/><rect class="phone" x="-10" y="-3" width="20" height="6" rx="2"/><animateMotion dur="10s" repeatCount="indefinite" rotate="auto" path="M206 26A52 52 0 0 1 258 78V122A52 52 0 0 1 206 174H114A52 52 0 0 1 62 122V78A52 52 0 0 1 114 26Z"/></g></g>
+        <g class="tu-ghost"><g transform="translate(160,26) rotate(0)"><path class="cone" d="M0 3L-11 26H11Z" opacity=".7"/><rect class="phone" x="-9" y="-3" width="18" height="6" rx="2"/></g><g transform="translate(242.8,41.2) rotate(45)"><path class="cone" d="M0 3L-11 26H11Z" opacity=".7"/><rect class="phone" x="-9" y="-3" width="18" height="6" rx="2"/></g><g transform="translate(258,100) rotate(90)"><path class="cone" d="M0 3L-11 26H11Z" opacity=".7"/><rect class="phone" x="-9" y="-3" width="18" height="6" rx="2"/></g><g transform="translate(242.8,158.8) rotate(135)"><path class="cone" d="M0 3L-11 26H11Z" opacity=".7"/><rect class="phone" x="-9" y="-3" width="18" height="6" rx="2"/></g><g transform="translate(160,174) rotate(180)"><path class="cone" d="M0 3L-11 26H11Z" opacity=".7"/><rect class="phone" x="-9" y="-3" width="18" height="6" rx="2"/></g><g transform="translate(77.2,158.8) rotate(225)"><path class="cone" d="M0 3L-11 26H11Z" opacity=".7"/><rect class="phone" x="-9" y="-3" width="18" height="6" rx="2"/></g><g transform="translate(62,100) rotate(270)"><path class="cone" d="M0 3L-11 26H11Z" opacity=".7"/><rect class="phone" x="-9" y="-3" width="18" height="6" rx="2"/></g><g transform="translate(77.2,41.2) rotate(315)"><path class="cone" d="M0 3L-11 26H11Z" opacity=".7"/><rect class="phone" x="-9" y="-3" width="18" height="6" rx="2"/></g></g></svg></figure>
+      <h2 class="ob-t" id="tuT3">Fais le tour, sans t'arrêter</h2>
+      <p class="ob-lead">Commence devant, en biais. Tourne autour de ta voiture à pas lents et réguliers, toujours à la même distance et à la même hauteur. Termine là où tu as commencé.</p>
+      <ul class="tu-list"><li>Un tour complet en 20 à 40 secondes</li><li>Ta voiture reste au milieu de l'écran</li><li class="no">Ne reviens pas en arrière et ne t'arrête pas en route</li></ul>
+    </div>
+    <div class="ob-step tu-step" data-step="4" aria-hidden="true">
+      <h2 class="ob-t" id="tuT4">Prêt à filmer ?</h2>
+      <p class="ob-lead">Vérifie ces 4 points, puis lance la caméra. Vigie fait ta voiture en 3D sur ce téléphone, en 1 à 2 minutes : la vidéo n'est jamais envoyée.</p>
+      <ol class="tu-check"><li>Un endroit dégagé, de jour</li><li>Téléphone à l'horizontale, à hauteur des phares</li><li>Toute la voiture dans l'image, à environ 3 m</li><li>Un tour complet, 20 à 40 s, sans t'arrêter</li></ol>
+      <p class="note">Pas de vidéo ? Prends 40 photos ou plus en tournant, une à chaque pas, toutes à la même hauteur. Une vidéo reste le plus sûr.</p>
+      <div class="tu-alt"><button class="btn ghost" id="tuVid" type="button">J'ai déjà une vidéo</button><button class="btn ghost" id="tuPics" type="button">Choisir des photos</button></div>
+    </div>
+    <div class="ob-nav">
+      <button class="btn ghost" id="tuBack" type="button" hidden>Retour</button>
+      <button class="btn" id="tuNext" type="button">Suivant</button>
     </div>
   </div>
 </div>
@@ -3222,7 +3343,7 @@ $('#rdPanB').addEventListener('click',e=>{const b=e.target.closest('[data-act]')
 $('#rd-auto').addEventListener('change',e=>{try{localStorage.setItem('vigie.radio',e.target.checked?'1':'0');}catch(err){}radioPrefUI();toast(e.target.checked?'Vigie s’ouvrira en mode autoradio':'Vigie s’ouvrira sur l’accueil');});
 document.addEventListener('keydown',e=>{
   if(e.key!=='Escape'||!RADIO.on)return;
-  if($('#sheet').classList.contains('open')||$('#onboard').classList.contains('open'))return;
+  if($('#sheet').classList.contains('open')||$('#onboard').classList.contains('open')||$('#scanTuto').classList.contains('open'))return;
   if(!$('#rdCam').hidden)camClose();else if(!$('#rdOver').hidden)rdPanelClose();else radioClose();
 });
 radioPrefUI();
@@ -3363,6 +3484,7 @@ function spinUI(){
   const si=$('#scanInfo');si.hidden=!(sc||SCAN.note);
   if(SCAN.note)si.textContent=SCAN.note;
   else if(sc){const q=SCAN.rec.quality||{};si.textContent=`Modèle 3D : ta vraie voiture, scannée${SCAN.rec.date?` le ${dayLong(SCAN.rec.date)}`:''} à partir de ${q.views||'—'} images de ta vidéo et peinte avec ses propres couleurs. Les vitres et les creux sont lissés, le dessous n'est pas vu et la taille est estimée, pas mesurée.`;}
+  scanTipsUI(SCAN.note?SCAN.tips:sc&&SCAN.rec.quality?SCAN.rec.quality.conseils:null);
   $('#scanSw').hidden=!sc;$('#scan-on').checked=SCAN.on;
   $('#spinFilm').textContent=has||sc?'Refaire le scan':'Scanner ma voiture';
   const del=$('#spinDel');del.hidden=!(has||sc);del.classList.remove('armed');del.textContent=spinDelLabel();
@@ -3462,9 +3584,27 @@ const SCAN_WHY={
   autre:'le calcul n’a pas abouti sur cet appareil',
   peu:'il faut au moins 16 photos lisibles, prises en tournant autour de la voiture'
 };
+// Bilan du tournage (v0.22) : ce que le scan a mesuré sur ta vidéo (scan3d.js, quality.conseils) et le conseil qui va
+// avec ; le nombre est l'étape du tuto à revoir
+const SCAN_TIPS={
+  coupee:[2,v=>`Recule d’un pas : ta voiture sortait de l’image sur ${v} % des images.`],
+  petite:[2,()=>'Rapproche-toi un peu : ta voiture était petite dans l’image (environ 3 m de la carrosserie suffisent).'],
+  vertical:[2,()=>'Tiens ton téléphone à l’horizontale : en vertical, toute la voiture tient mal dans l’image.'],
+  sombre:[1,()=>'Filme de jour ou dans un endroit plus éclairé : tes images étaient sombres.'],
+  rapide:[3,v=>`Prends ton temps : ton tour a duré ${v} s, vise 20 à 40 s.`],
+  irregulier:[3,()=>'Marche à pas réguliers, sans t’arrêter ni revenir en arrière : ton tour était irrégulier.'],
+  calage:[3,()=>'Garde la même hauteur et la même distance tout le long : le calage précis de la caméra n’a pas pu se faire.'],
+  photos:[3,()=>'Prends tes photos à la même hauteur, une à chaque pas, en faisant tout le tour : le calage précis n’a pas pu se faire.']
+};
+function scanTipsUI(list){
+  const box=$('#scanTips'),ul=$('#scanTipsL'),L=(list||[]).filter(t=>t&&SCAN_TIPS[t.k]).slice(0,3);
+  box.hidden=!L.length;ul.textContent='';
+  L.forEach(t=>{const li=document.createElement('li');li.textContent=SCAN_TIPS[t.k][1](t.v);ul.appendChild(li);});
+  box.dataset.step=L.length?SCAN_TIPS[L[0].k][0]:0;
+}
 async function spinMake(kind,files){
   if(SPIN.busy||!files||!files.length)return;
-  SPIN.busy=true;window.VigieState.busy=true;spinErr('');SCAN.note='';SCAN.kind=kind;spinUI();$('#spinProg').hidden=false;spinProg(0,kind==='video'?'Lecture de la vidéo…':'Lecture des photos…');
+  SPIN.busy=true;window.VigieState.busy=true;spinErr('');SCAN.note='';SCAN.tips=null;SCAN.kind=kind;spinUI();$('#spinProg').hidden=false;spinProg(0,kind==='video'?'Lecture de la vidéo…':'Lecture des photos…');
   const t0=performance.now();
   try{
     let r,scan=null;
@@ -3479,7 +3619,7 @@ async function spinMake(kind,files){
         const c=e&&e.message;
         if(c==='lecture')throw e;
         const why=c==='modele'&&!document.querySelector('link[rel="manifest"]')?SCAN_WHY.modelePage:(SCAN_WHY[c]||SCAN_WHY.autre);
-        SCAN.note=`Le modèle 3D n’a pas pu être fait : ${why}. La vue 360° est prête. Pour la 3D, refilme un tour complet à environ 3 m, la voiture entière au milieu de l’écran.`;
+        SCAN.note=`Le modèle 3D n’a pas pu être fait : ${why}. La vue 360° est prête. Pour la 3D, refilme un tour complet à environ 3 m, la voiture entière au milieu de l’écran.`;SCAN.tips=e&&e.quality&&e.quality.conseils;
         if(e&&e.spinFrames&&e.spinFrames.length>=8)r={frames:e.spinFrames,w:e.spinSize[0],h:e.spinSize[1]};
         else{spinProg(0,'Lecture de la vidéo…');r=await framesFromVideo(files[0]);}
       }
@@ -3496,7 +3636,7 @@ async function spinMake(kind,files){
         }catch(e){
           const c=e&&e.message;
           const why=c==='modele'&&!document.querySelector('link[rel="manifest"]')?SCAN_WHY.modelePage:(SCAN_WHY[c]||SCAN_WHY.autre);
-          SCAN.note=`Le modèle 3D n’a pas pu être fait : ${why}. La vue 360° est prête. Pour la 3D, le plus sûr reste une vidéo d’un tour complet.`;
+          SCAN.note=`Le modèle 3D n’a pas pu être fait : ${why}. La vue 360° est prête. Pour la 3D, le plus sûr reste une vidéo d’un tour complet.`;SCAN.tips=e&&e.quality&&e.quality.conseils;
           if(e&&e.spinFrames&&e.spinFrames.length>=8)r={frames:e.spinFrames,w:e.spinSize[0],h:e.spinSize[1]};
           else{spinProg(0,'Lecture des photos…');r=await framesFromPhotos(files);}
         }
@@ -3515,11 +3655,63 @@ async function spinMake(kind,files){
     spinErr(SPIN_MSG[e&&e.message]||'La vue 360° n’a pas pu être préparée. Réessaie, ou choisis 8 à 36 photos prises en tournant autour de la voiture.');
   }finally{SPIN.busy=false;window.VigieState.busy=false;$('#spinProg').hidden=true;spinUI();}
 }
-$('#spinFilm').addEventListener('click',()=>{spinErr('');$('#spinCam').click();});
+$('#spinFilm').addEventListener('click',()=>{spinErr('');if(!tuSeen){tuOpen(0);return;}$('#spinCam').click();});
 $('#spinPick').addEventListener('click',()=>{spinErr('');$('#spinVid').click();});
 $('#spinPhotos').addEventListener('click',()=>{spinErr('');$('#spinPics').click();});
 ['spinCam','spinVid'].forEach(id=>$('#'+id).addEventListener('change',e=>{const f=e.target.files;if(f&&f[0])spinMake('video',[f[0]]);e.target.value='';}));
 $('#spinPics').addEventListener('change',e=>{const f=e.target.files;if(f&&f.length)spinMake('photos',[...f]);e.target.value='';});
+/* ---------- Tuto « Bien scanner ta voiture » (v0.22) : 5 étapes ; s'ouvre seul au tout premier scan, puis avec
+   « Comment bien filmer ta voiture » ; la dernière étape lance la caméra (ou une vidéo, ou des photos) ---------- */
+const TU={el:$('#scanTuto'),step:0,n:5,last:null,x0:null,y0:0};
+let tuSeen=false;try{tuSeen=localStorage.getItem('vigie.scanTuto')==='1';}catch(e){}
+function tuStep(i){
+  TU.step=clamp(i,0,TU.n-1);
+  $$('.tu-step',TU.el).forEach((s,k)=>{const on=k===TU.step;s.classList.toggle('on',on);s.setAttribute('aria-hidden',on?'false':'true');});
+  $$('.ob-dots i',TU.el).forEach((d,k)=>d.classList.toggle('on',k===TU.step));
+  $('#tuCount').textContent=`Étape ${TU.step+1} sur ${TU.n}`;
+  $('#tuBack').hidden=TU.step===0;
+  $('#tuNext').textContent=TU.step===TU.n-1?'Filmer maintenant':'Suivant';
+  TU.el.setAttribute('aria-labelledby','tuT'+TU.step);
+  $('.ob-card',TU.el).scrollTop=0;
+}
+function tuOpen(i){
+  if(SPIN.busy||TU.el.classList.contains('open'))return;
+  TU.last=document.activeElement;tuStep(i||0);
+  TU.el.classList.add('open');TU.el.setAttribute('aria-hidden','false');
+  tuSeen=true;try{localStorage.setItem('vigie.scanTuto','1');}catch(e){}
+  setTimeout(()=>{try{$('.ob-card',TU.el).focus({preventScroll:true});}catch(e){}},80);
+}
+function tuClose(){
+  if(!TU.el.classList.contains('open'))return;
+  TU.el.classList.remove('open');TU.el.setAttribute('aria-hidden','true');
+  if(TU.last&&TU.last.focus&&document.contains(TU.last))TU.last.focus({preventScroll:true});
+}
+$('#spinHow').addEventListener('click',()=>tuOpen(0));
+$('#scanTipsTuto').addEventListener('click',()=>tuOpen(+$('#scanTips').dataset.step||0));
+$('#tuNext').addEventListener('click',()=>{if(TU.step<TU.n-1){tuStep(TU.step+1);return;}tuClose();spinErr('');$('#spinCam').click();});
+$('#tuBack').addEventListener('click',()=>tuStep(TU.step-1));
+$('#tuClose').addEventListener('click',tuClose);
+$('#tuVid').addEventListener('click',()=>{tuClose();spinErr('');$('#spinVid').click();});
+$('#tuPics').addEventListener('click',()=>{tuClose();spinErr('');$('#spinPics').click();});
+TU.el.addEventListener('click',e=>{if(e.target===TU.el)tuClose();});
+TU.el.addEventListener('keydown',e=>{
+  if(!TU.el.classList.contains('open'))return;
+  if(e.key==='Escape'){e.preventDefault();tuClose();return;}
+  if(e.key==='ArrowRight'&&TU.step<TU.n-1){e.preventDefault();tuStep(TU.step+1);return;}
+  if(e.key==='ArrowLeft'&&TU.step>0){e.preventDefault();tuStep(TU.step-1);return;}
+  if(e.key!=='Tab')return;
+  const f=$$('button:not([hidden])',TU.el).filter(x=>x.offsetParent!==null);
+  if(!f.length)return;
+  const a=f[0],z=f[f.length-1];
+  if(e.shiftKey&&(document.activeElement===a||!TU.el.contains(document.activeElement))){e.preventDefault();z.focus();}
+  else if(!e.shiftKey&&document.activeElement===z){e.preventDefault();a.focus();}
+});
+// Glisser du doigt vers la gauche ou la droite : étape suivante ou précédente
+{const card=$('.ob-card',TU.el);
+ card.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')return;TU.x0=e.clientX;TU.y0=e.clientY;});
+ card.addEventListener('pointerup',e=>{if(TU.x0==null)return;const dx=e.clientX-TU.x0,dy=e.clientY-TU.y0;TU.x0=null;
+   if(Math.abs(dx)>60&&Math.abs(dx)>1.5*Math.abs(dy)){if(dx<0&&TU.step<TU.n-1)tuStep(TU.step+1);else if(dx>0&&TU.step>0)tuStep(TU.step-1);}});
+ card.addEventListener('pointercancel',()=>{TU.x0=null;});}
 $('#spinDel').addEventListener('click',async()=>{
   const b=$('#spinDel');
   if(!b.classList.contains('armed')){b.classList.add('armed');b.textContent='Confirmer';clearTimeout(b._t);b._t=setTimeout(()=>{b.classList.remove('armed');b.textContent=spinDelLabel();},4000);return;}

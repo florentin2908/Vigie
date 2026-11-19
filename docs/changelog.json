@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.22",
+      "date": "19 nov. 2026",
+      "items": [
+        "Nouveau tuto « Comment bien filmer ta voiture » dans Garage : 5 étapes illustrées (le bon endroit, la lumière, comment tenir ton téléphone, le tour en animation, la liste à vérifier). Il s'ouvre tout seul avant ton premier scan",
+        "Après le scan, Vigie te dit ce qui a gêné (voiture coupée par l'image ou trop petite, images sombres, tour trop rapide ou irrégulier, téléphone à la verticale) et comment faire mieux",
+        "Peinture plus fidèle : les reflets du ciel qui restaient collés sur les portières sont effacés, ta voiture garde sa vraie couleur partout, les détails restent nets",
+        "Refais ton scan pour en profiter : une voiture scannée avant garde sa peinture d'origine"
+      ]
+    },
+    {
       "version": "0.21",
       "date": "19 nov. 2026",
       "items": [

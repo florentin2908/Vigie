@@ -1002,6 +1002,19 @@ async function scanFrames(F, opts, progress) {
   const stats = masks.map(m => maskStats(m, SW, SH));
   const ok = stats.map(s => s.frac > .02 && s.n > 0);
   q.carFrames = ok.filter(Boolean).length; q.frames = NF;
+  // Bilan du tournage (v0.22) : ce qui gêne le scan, mesuré sur les images ; l'appli en tire 1 à 3 conseils. Seuils réglés
+  // pour que la vidéo de test (bien filmée : voiture touchant le bord sur 28 % des images, 68 % de la largeur) n'en ait aucun.
+  // La lumière est mesurée sur toute l'image : une voiture noire de jour n'est pas « sombre ».
+  const cons = []; q.conseils = cons;
+  { const okS = stats.filter((s_, i) => ok[i]);
+    if (SH > SW) cons.push({ k: 'vertical' });
+    if (okS.length) { const cut = okS.filter(s_ => s_.cutL || s_.cutR).length / okS.length;
+      if (cut > .45) cons.push({ k: 'coupee', v: Math.round(cut * 100) });
+      else if (median(okS.map(s_ => s_.w / SW)) < .3 && median(okS.map(s_ => s_.h / SH)) < .3) cons.push({ k: 'petite' }); }
+    let lum = 0, nl = 0;
+    for (let i = 0; i < NF; i += 4) { const d = F.smalls[i].data; for (let p = 0; p < SW * SH; p += 13) { lum += d[p * 4] * .3 + d[p * 4 + 1] * .59 + d[p * 4 + 2] * .11; nl++; } }
+    if (nl && lum / nl < 50) cons.push({ k: 'sombre' });
+    if (!F.photos && F.dur && F.dur < 15) cons.push({ k: 'rapide', v: Math.round(F.dur) }); }
   if (q.carFrames < NF * .6) { const e = new Error('voiture'); e.quality = q; throw e; }
   // Angle parcouru, image après image
   progress('pose', 0);
@@ -1015,6 +1028,7 @@ async function scanFrames(F, opts, progress) {
   const total = steps.reduce((a, b) => a + b, 0);
   q.peak = Math.round(median(peaks) * 10) / 10; q.badSteps = dxs.filter((d, i) => Math.sign(d) !== sgn || Math.abs(d) > Math.abs(med) * 4 || peaks[i] < 3).length;
   const heading = [0]; for (let i = 1; i < NF; i++) heading.push(heading[i - 1] + steps[i - 1] / Math.abs(total) * 2 * Math.PI);
+  if (!F.photos && q.badSteps > NF * .2) cons.push({ k: 'irregulier' });
   const f0 = fpx;
   // Visée : on suppose que la voiture est gardée au milieu de l'écran (conseil affiché avant de filmer). Le centre de
   // la silhouette est faussé par la perspective et par les bords du cadre : sur la vidéo de test, s'y fier sculpte moins bien.
@@ -1065,6 +1079,7 @@ async function scanFrames(F, opts, progress) {
         else q.calage.refus = 'silhouettes moins bien'; } }
   }
   q.calage = Object.assign(q.calage || {}, { garde: calee });
+  if (!calee && !opts.truePoses && opts.sfm !== false && F.grays) cons.push({ k: F.photos ? 'photos' : 'calage' });
   progress('carve', .9);
   const camsTex = poses.map(camOf);
   vis.forEach((i, j) => { theta[i] = poses[j].theta; });
@@ -1135,7 +1150,7 @@ async function scanFrames(F, opts, progress) {
     const views = vis.map((i, j) => ({ img: F.bigs[i], mask: erode1(masks[i], SW, SH), cam: camsTex[j], gain: 1 }));
     const lin = c => Math.pow(c, 2.2), lumRef = .3 * lin(paint[0]) + .59 * lin(paint[1]) + .11 * lin(paint[2]);
     const tb = performance.now();
-    const bk = await bakeTexture(THREE, mm, views, { size: 2048, SW, SH, fN: [fpx / SW, fpx / SH], paint, roof, H: dims.H, lumRef, wheels: m.wheels, progress: k => progress('paint', k) });
+    const bk = await bakeTexture(THREE, mm, views, { size: 2048, SW, SH, fN: [fpx / SW, fpx / SH], paint, roof, H: dims.H, lumRef, wheels: m.wheels, soft: opts.soft, progress: k => progress('paint', k) });
     const tex = bk.blob; mm.glass = bk.glass;
     q.bake = { views: views.length, texelsParMetre: Math.round(mm.texPerM), sommets: mm.pos.length / 3, triangles: mm.idx.length / 3, ms: Math.round(performance.now() - tb),
       textureKo: Math.round(tex.size / 1024), vitresPct: bk.glassShare };
@@ -1526,22 +1541,24 @@ async function bakeTexture(THREE, mm, views, opts) {
         void main(){vec2 im;float c=seen(im);if(c<0.0)discard;if(c<texture2D(uCmax,vUv).r-0.12)discard;   // seulement les bonnes vues
         float l=dot(texture2D(uImg,im).rgb*uGain,vec3(0.3,0.59,0.11));gl_FragColor=vec4(l,l,l,l);}` });
     // 3e passe : moyenne « robuste » autour de la couleur de base (référence = moyenne géométrique de la vue la plus sombre
-    // et de la moyenne) : les reflets clairs et les vues mal recalées (bien plus sombres) comptent peu
-    const robU = Object.assign(camU(), { uMsk: accU.uMsk, uDep: { value: depthRT.texture }, uImg: accU.uImg, uCmax: { value: cmaxRT.texture }, uAcc: { value: accRT.texture }, uMin: { value: minRT.texture }, uGain: accU.uGain });
+    // et de la moyenne) : les reflets clairs et les vues mal recalées (bien plus sombres) comptent peu. Depuis v0.22, sur
+    // la carrosserie, les vues jusqu'à 25-30° du meilleur angle comptent aussi (poids exp(8 (c - cmax)) au lieu de 48) : un
+    // reflet ne reste pas au même endroit d'une image à l'autre, il se dilue ; les caméras calées gardent les détails nets
+    const robU = Object.assign(camU(), { uMsk: accU.uMsk, uDep: { value: depthRT.texture }, uImg: accU.uImg, uCmax: { value: cmaxRT.texture }, uAcc: { value: accRT.texture }, uMin: { value: minRT.texture }, uGain: accU.uGain, uSoft: { value: opts.soft || 8 } });
     const robMat = new THREE.ShaderMaterial({ uniforms: robU, vertexShader: BAKE_VS, side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true,
       blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor,
-      fragmentShader: BAKE_TEST + `uniform sampler2D uImg;uniform sampler2D uCmax;uniform sampler2D uAcc;uniform sampler2D uMin;uniform float uGain;
+      fragmentShader: BAKE_TEST + `uniform sampler2D uImg;uniform sampler2D uCmax;uniform sampler2D uAcc;uniform sampler2D uMin;uniform float uGain;uniform float uSoft;
         void main(){vec2 im;float c=seen(im);if(c<0.0)discard;
         float cm=texture2D(uCmax,vUv).r;vec4 a=texture2D(uAcc,vUv);float mn=texture2D(uMin,vUv).r;
         float ml=a.a>1e-6?dot(a.rgb/a.a,vec3(0.3,0.59,0.11)):0.1;float ref=sqrt(max(min(mn,ml),1e-4)*max(ml,1e-4));
         vec3 col=texture2D(uImg,im).rgb*uGain;float lum=dot(col,vec3(0.3,0.59,0.11));float d=log((lum+0.002)/(ref+0.002));
-        float w=exp(mix(48.0,400.0,vSharp)*min(c-cm,0.1))*exp(-d*d*2.5);
+        float w=exp(mix(uSoft,400.0,vSharp)*min(c-cm,0.1))*exp(-d*d*2.5);
         gl_FragColor=vec4(col*w,w);}` });
     const finU = { uAcc: { value: accRT.texture }, uRob: { value: robRT.texture }, uMin: { value: minRT.texture }, uCmax: { value: cmaxRT.texture }, uPaint: { value: new THREE.Color().setRGB(...opts.paint, THREE.SRGBColorSpace) },
       uRoof: { value: new THREE.Color().setRGB(...opts.roof, THREE.SRGBColorSpace) }, uH: { value: opts.H },
       uWh: { value: [0, 1, 2, 3].map(i => { const w = opts.wheels && opts.wheels[i]; return w ? new THREE.Vector4(w.x, w.r, Math.abs(w.z), w.s) : new THREE.Vector4(0, 0, 0, 0); }) } };
     const finMat = new THREE.ShaderMaterial({ uniforms: finU, vertexShader: BAKE_VS, side: THREE.DoubleSide, depthTest: false, depthWrite: false,
-      fragmentShader: `uniform sampler2D uAcc;uniform sampler2D uRob;uniform sampler2D uMin;uniform sampler2D uCmax;uniform vec3 uPaint;uniform vec3 uRoof;uniform float uH;uniform vec4 uWh[4];varying vec2 vUv;varying float vY;varying float vSharp;varying float vRefl;varying vec3 vP;
+      fragmentShader: `uniform sampler2D uAcc;uniform sampler2D uRob;uniform sampler2D uMin;uniform sampler2D uCmax;uniform vec3 uPaint;uniform vec3 uRoof;uniform float uH;uniform vec4 uWh[4];varying vec2 vUv;varying float vY;varying float vSharp;varying float vRefl;varying vec3 vP;varying vec3 vN;
         void main(){vec4 a=texture2D(uAcc,vUv);vec4 b=texture2D(uRob,vUv);float cm=texture2D(uCmax,vUv).r;vec4 mn=texture2D(uMin,vUv);
         vec3 seen=a.a>1e-6?a.rgb/a.a:uPaint;if(b.a>1e-6&&vSharp<0.5)seen=b.rgb/b.a;float sl=dot(seen,vec3(0.3,0.59,0.11));
         float r=mn.r<7.0&&sl>1e-4?mn.r/sl:1.0;
@@ -1552,7 +1569,10 @@ async function bakeTexture(THREE, mm, views, opts) {
         float ka=(pc*3.6-p1*c1)/max(det,1e-7),kb=(pp*c1-p1*pc)/max(det,1e-7);if(kb<0.0){kb=0.0;ka=pc/max(pp,1e-7);}
         float rel=length(seen-ka*uPaint-kb)/(length(seen)+0.02);
         float isP=smoothstep(0.22,0.1,rel)*smoothstep(0.25,0.45,ka)*(1.0-vRefl)*(1.0-vSharp);
-        seen=mix(seen,min(ka,1.25)*uPaint,isP);
+        // v0.22 : reflets clairs figés retirés aussi de la teinte (a) : la peinture ne dépasse plus sa vraie couleur, sauf un
+        // peu sur ce qui regarde le ciel (capot, toit) ; le vernis recrée les reflets à l'affichage
+        float cap=1.0+0.22*clamp(normalize(vN).y,0.0,1.0),kc=ka>cap?cap+(ka-cap)*0.15:ka;
+        seen=mix(seen,kc*uPaint,isP);
         float conf=smoothstep(0.14,0.34,cm);
         vec3 prior=mix(uPaint,uRoof,smoothstep(0.70*uH,0.86*uH,vY));   // ce qu'aucune image ne voit : peinture en bas, toit en haut
         vec3 c=clamp(mix(prior,seen,conf),0.0,1.0);
