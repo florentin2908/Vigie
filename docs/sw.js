@@ -1,7 +1,7 @@
 /* Vigie — service hors ligne (v0.13).
    L'appli s'ouvre même sans réseau. Les prix des carburants, la carte et Mécano restent en ligne :
    ils ne sont jamais servis depuis une vieille copie. */
-const VERSION = 'vigie-v0.23'; // remplacé par la version du changelog dans docs/ (outils/construire-site.py)
+const VERSION = 'vigie-v0.24'; // remplacé par la version du changelog dans docs/ (outils/construire-site.py)
 const SHELL = ['./', 'index.html', 'changelog.json', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 const CDN = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 

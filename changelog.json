@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.24",
+      "date": "19 nov. 2026",
+      "items": [
+        "Plus aucune bosse sur ta voiture scannée : la carrosserie est maintenant construite d'un seul tenant, coupe après coupe, au lieu d'être assemblée en petits cubes. Les reflets glissent sur le capot, le toit et les portières sans la moindre ondulation, comme sur une vraie maquette",
+        "Capot, pare-brise et hayon sans marches : leur hauteur est mesurée au dixième de millimètre",
+        "Passages de roue nets : arche bien ronde, bord franc, intérieur noir comme sur une vraie voiture",
+        "Vitres de côté aux bords bien droits : elles s'arrêtent pile au rebord de la portière et sous l'arête du toit",
+        "Refais ton scan pour avoir la nouvelle carrosserie"
+      ]
+    },
+    {
       "version": "0.23",
       "date": "19 nov. 2026",
       "items": [

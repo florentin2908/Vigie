@@ -870,19 +870,26 @@ function tautSides(g, nx, ny, nz, mid, jMin) {
 // douces). La ligne de ceinture est mesurée (coude de la demi-largeur, droite le long de la voiture) ; l'angle de rentrée
 // des vitres est mesuré puis borné à 10-20° (la sculpture arrondit trop le haut). Profils lissés le long de la voiture
 // (médiane, puis moyenne gaussienne qui garde les cassures nettes : hayon, pare-brise) ; bouts arrondis comme des
-// boucliers. La surface étant déjà nette, le maillage n'est presque plus lissé (Taubin 10, normales 8 : arêtes nettes).
+// boucliers. v0.24 : haut et bas mesurés au dixième de millimètre ; profils et pente des vitres rendus à la carrosserie
+// lisse (maquetteMesh), qui remplace le champ rastérisé ci-dessous (gardé pour le sens de la voiture et en repli).
 const MQ = { taubin: 10, normales: 8, sigma: 9, rb: .07, rs: .025, rr: .055, rt: .13, ledge: .035, crown: .015, tanMin: Math.tan(10 * Math.PI / 180), tanMax: Math.tan(20 * Math.PI / 180), rPlan: .18, rTop: .12, rBot: .1 };
 function maquetteField(D, sill) {
   const { nx, ny, nz, cell, field: F, b0, bc } = D, kmid = (bc - b0) / cell - .5, NXY = nx * ny;
   const W = new Float32Array(nx * ny).fill(-1), top = new Float32Array(nx).fill(NaN), bot = new Float32Array(nx).fill(NaN);
+  const pc = new Float32Array(ny), pe = new Float32Array(ny);   // par rangée : plus forte valeur au milieu (±6 colonnes) et sur la moitié
   for (let i = 0; i < nx; i++) {
     let jt = -1, jb = ny;
     for (let j = 0; j < ny; j++) {
       for (let k = nz - 1; k > kmid; k--) { const v = F[k * NXY + j * nx + i]; if (v >= 128) { const o = k + 1 < nz ? F[(k + 1) * NXY + j * nx + i] : 0;
         W[i * ny + j] = (k - kmid + (v - 127.5) / Math.max(1, v - o)) * cell; if (j < jb) jb = j; break; } }
-      for (let k = Math.max(0, Math.floor(kmid - 6)); k <= Math.min(nz - 1, Math.ceil(kmid + 6)); k++) if (F[k * NXY + j * nx + i] >= 128) { jt = j; break; }
+      let mc = 0, me = 0;
+      for (let k = Math.max(0, Math.floor(kmid - 6)); k <= Math.min(nz - 1, Math.ceil(kmid + 6)); k++) mc = Math.max(mc, F[k * NXY + j * nx + i]);
+      for (let k = Math.floor(kmid) + 1; k < nz; k++) me = Math.max(me, F[k * NXY + j * nx + i]);
+      pc[j] = mc; pe[j] = me; if (mc >= 128) jt = j;
     }
-    if (jt >= 0) { top[i] = (jt + 1) * cell; bot[i] = jb * cell; }
+    // v0.24 : haut et bas pris là où la forme passe 127,5 entre deux cubes (au dixième de millimètre, plus en marches de 2,5 cm)
+    if (jt >= 0) { top[i] = (jt + .5 + (jt + 1 < ny ? (pc[jt] - 127.5) / Math.max(1, pc[jt] - pc[jt + 1]) : .5)) * cell;
+      bot[i] = jb > 0 && jb < ny ? (jb - .5 + clamp((127.5 - pe[jb - 1]) / Math.max(1, pe[jb] - pe[jb - 1]), 0, 1)) * cell : jb * cell; }
   }
   const yv = j => (j + .5) * cell, av = i => D.a0 + (i + .5) * cell;
   let i0 = nx, i1 = -1; for (let i = 0; i < nx; i++) if (!isNaN(top[i])) { if (i < i0) i0 = i; if (i > i1) i1 = i; }
@@ -913,7 +920,27 @@ function maquetteField(D, sill) {
     for (let i = 0; i < nx; i++) { if (isNaN(o[i])) continue; let sm = 0, n = 0;
       for (let d = -3 * sg; d <= 3 * sg; d++) if (i + d >= 0 && i + d < nx && !isNaN(o[i + d])) { const dv = sv ? (o[i + d] - o[i]) / sv : 0, g = Math.exp(-d * d / (2 * sg * sg) - dv * dv / 2); sm += o[i + d] * g; n += g; } o2[i] = sm / n; }
     return o2; };
-  const T = smooth(top, 4, .03), B = smooth(bot, 4, .03), WB = smooth(wb, 4);
+  // v0.24 : pour le bas et la pente des vitres, droite locale robuste au lieu de la moyenne : autour de chaque tranche,
+  // droite ajustée (poids gaussiens) ; les tranches loin de la droite (écart / sv) comptent moins. Le bas qui remonte
+  // vers les boucliers reste une pente douce (plus de marche sous les bouts).
+  const droite = (v, r, sv = .08) => { const o = Float32Array.from(v);
+    for (let i = 0; i < nx; i++) { const a = []; for (let d = -r; d <= r; d++) if (i + d >= 0 && i + d < nx && !isNaN(v[i + d])) a.push(v[i + d]); if (a.length && !isNaN(v[i])) o[i] = median(a); }
+    const o2 = Float32Array.from(o), sg = MQ.sigma, R = 3 * sg;
+    for (let i = 0; i < nx; i++) { if (isNaN(o[i])) continue; let a = o[i], b = 0;
+      for (let it = 0; it < 3; it++) { let S0 = 0, S1 = 0, S2 = 0, T0 = 0, T1 = 0;
+        for (let d = -R; d <= R; d++) { const j = i + d; if (j < 0 || j >= nx || isNaN(o[j])) continue;
+          const e = it ? (o[j] - a - b * d) / sv : 0, g = Math.exp(-d * d / (2 * sg * sg) - e * e / 2);
+          S0 += g; S1 += g * d; S2 += g * d * d; T0 += g * o[j]; T1 += g * o[j] * d; }
+        const den = S0 * S2 - S1 * S1; if (den > 1e-9) { a = (T0 * S2 - T1 * S1) / den; b = (S0 * T1 - S1 * T0) / den; } else if (S0 > 0) { a = T0 / S0; b = 0; } }
+      o2[i] = a; }
+    return o2; };
+  const T = smooth(top, 4, .03), B = droite(bot, 2, .03), WB = smooth(wb, 4);
+  // pente des vitres de côté (mesurée sur les tranches d'habitacle, bornée, lissée) pour la carrosserie lisse
+  const tgRaw = new Float32Array(nx).fill(NaN);
+  for (let i = i0; i <= i1; i++) { const t = T[i], w = WB[i]; if (isNaN(t) || isNaN(w)) continue;
+    const h = t - belt(av(i)), f = clamp(h / .25, 0, 1), jj = Math.floor((t - .12) / cell); if (h < .1 || f < .5 || jj < 0 || jj >= ny || !(W[i * ny + jj] > 0)) continue;
+    tgRaw[i] = clamp((w - MQ.ledge * f - W[i * ny + jj]) / h, MQ.tanMin, MQ.tanMax); }
+  const coupes = { i0, i1, T: Float32Array.from(T), B: Float32Array.from(B), WB: Float32Array.from(WB), TG: droite(tgRaw, 4), ka, kb, sill: sill || 0 };
   for (const [ie, dir] of [[i0, 1], [i1, -1]]) {
     const ir = ie + dir * Math.round(MQ.rPlan / cell), wRef = WB[ir], tRef = T[ie + dir * Math.round(MQ.rTop / cell)], bRef = B[ie + dir * Math.round(MQ.rBot / cell)];
     for (let n = 0; n * cell < MQ.rPlan; n++) { const i = ie + dir * n, d = (n + .5) * cell; if (isNaN(WB[i])) continue;
@@ -947,7 +974,143 @@ function maquetteField(D, sill) {
   for (let p = 0; p < 4; p++) blur1(Gf, nx, ny, nz, 0);
   for (let n = 0; n < G.length; n++) F[n] = Math.round(clamp(Gf[n], 0, 1) * 255);
   const cabH = new Float32Array(nx).fill(-1); for (let i = i0; i <= i1; i++) if (!isNaN(T[i])) cabH[i] = T[i] - belt(av(i));   // hauteur d'habitacle au-dessus de la ceinture
-  return { ceintureM: Math.round(kb * 100) / 100, penteCeinture: Math.round(ka * 1000) / 1000, tranchesHabitacle: cab, belt: [ka, kb, cabH] };
+  return { ceintureM: Math.round(kb * 100) / 100, penteCeinture: Math.round(ka * 1000) / 1000, tranchesHabitacle: cab, belt: [ka, kb, cabH], coupes };
+}
+// Carrosserie lisse (v0.24) : plus de grille de cubes (marching cubes : petites ondulations visibles dans les reflets).
+// La surface est construite directement le long de la voiture, coupe après coupe, avec les mêmes mesures que la maquette
+// (haut, bas, demi-largeur de caisse, ligne de ceinture, pente des vitres). Chaque coupe a toujours le même nombre de
+// points aux mêmes endroits (fond, arrondi du bas de caisse, flanc, épaulement, rebord, vitres, arête du toit, toit
+// bombé) : les arêtes sont des lignes nettes, sans vrille. Une seule forme de coupe qui passe en douceur du capot
+// (grand arrondi) à l'habitacle (épaulement net, vitres qui rentrent). Coupes serrées aux bouts (arrondis des boucliers)
+// et autour des roues ; passages de roue découpés exactement dans les coupes (arche ronde, bords nets, fond plat) ; bouts
+// fermés par une face plate raccordée en douceur. Normales moyennées sur les faces voisines, sauf aux vraies cassures
+// (bords des arches) qui restent nettes.
+// Points par morceau de demi-coupe : fond, arrondi du bas, flanc bas (ou paroi du passage de roue), voûte de l'arche,
+// flanc, épaulement, rebord, vitres, arête du toit, toit.
+const LOFT = { n: [7, 6, 6, 5, 14, 7, 2, 14, 7, 16], gap: .035, depth: .27, archDeg: 6, endDeg: 7.5, cap: 5, crease: Math.cos(Math.PI / 4) };
+function maquetteMesh(D, C, wheels, align) {
+  const { cell, a0, ac, bc } = D, { i0, i1, ka, kb } = C, nS = i1 - i0 + 1;
+  if (nS < 20) return null;
+  const fill = v => { if (!v) return null; const o = new Float32Array(nS); let last = -1;   // profil sans trou (interpolé, bouts prolongés)
+    for (let n = 0; n < nS; n++) { const x = v[i0 + n]; if (isNaN(x)) continue;
+      if (last < 0) o.fill(x, 0, n); else for (let m = last + 1; m < n; m++) o[m] = o[last] + (x - o[last]) * (m - last) / (n - last);
+      o[n] = x; last = n; }
+    if (last < 0) return null; o.fill(o[last], last + 1); return o; };
+  const T = fill(C.T), B = fill(C.B), WB = fill(C.WB), TG = fill(C.TG); if (!T || !B || !WB) return null;
+  const at = (v, x) => { const u = clamp((x - a0) / cell - .5 - i0, 0, nS - 1), k = Math.min(nS - 2, Math.floor(u)); return v[k] + (v[k + 1] - v[k]) * (u - k); };
+  const xMin = a0 + i0 * cell, xMax = a0 + (i1 + 1) * cell;
+  const ends = [[xMin, 1], [xMax, -1]].map(([xe, dir]) => ({ xe, dir, w: at(WB, xe + dir * MQ.rPlan), t: at(T, xe + dir * MQ.rTop), b: at(B, xe + dir * MQ.rBot) }));
+  const circ = (r, d) => r - Math.sqrt(Math.max(0, r * r - (r - d) ** 2));   // retrait d'un arrondi de rayon r, à la distance d du bout
+  const prof = x => { let w = at(WB, x), t = at(T, x), b = at(B, x);
+    for (const e of ends) { const d = Math.max(0, (x - e.xe) * e.dir);
+      if (d < MQ.rPlan) w = Math.min(w, e.w - circ(MQ.rPlan, d));
+      if (d < MQ.rTop) t = Math.min(t, e.t - circ(MQ.rTop, d));
+      if (d < MQ.rBot) b = Math.max(b, e.b + circ(MQ.rBot, d)); }
+    b = Math.max(b, C.sill); return { w, t, b: Math.min(b, t - .2), tg: TG ? at(TG, x) : MQ.tanMin }; };
+  const N = LOFT.n, NH = N.reduce((a, n) => a + n + 1, 0), NR = 2 * NH - 2;
+  // Demi-coupe (z ≥ 0), du milieu du dessous au milieu du toit : NH points [z, y]. notch : passage de roue (paroi zin, haut de l'arche yArc)
+  const half = (x, notch, rNear) => {
+    const { w, t, b, tg } = prof(x), H = t - b, rb = Math.min(MQ.rb, H / 3), tE = t - MQ.crown, bl = ka * x + kb, f = clamp((tE - bl) / .25, 0, 1);
+    const yB = clamp(Math.min(bl, tE), b + rb + .04, tE), rT0 = Math.min(MQ.rt, H / 3), rS = clamp(rT0 + (MQ.rs - rT0) * f, .005, Math.max(.005, yB - b - rb - .02));
+    const wg0 = Math.min(w - MQ.ledge * f, w - rS), hg = tE - yB, rr = Math.min(MQ.rr, hg / 2), yTop = yB - rS;
+    const sl = f * Math.max(0, t - bl) * tg / Math.max(.02, hg - rr), wg1 = Math.max(wg0 - sl * hg, rr + .08);   // rentrée des vitres atteinte au début de l'arête du toit
+    const o = [], seg = (n, fn) => { for (let k = 0; k <= n; k++) o.push(...fn(k / n)); };
+    const ln = (n, z0, y0, z1, y1) => seg(n, u => [z0 + (z1 - z0) * u, y0 + (y1 - y0) * u]);
+    const ar = (n, cz, cy, r, a, a2) => seg(n, u => [cz + r * Math.cos(a + (a2 - a) * u), cy + r * Math.sin(a + (a2 - a) * u)]);
+    const yLow = clamp(Math.max(rNear, b + rb + .01), b + rb, yTop), yl = notch ? Math.max(notch.yArc, b + rb + .01) : 0;
+    if (notch && notch.zin > .1 && notch.zin < w - rb - .01 && yl < yTop - .01) {   // passage de roue : fond, paroi, voûte, puis le flanc
+      const zi = notch.zin; ln(N[0], 0, b, zi, b); ln(N[1], zi, b, zi, b); ln(N[2], zi, b, zi, yl); ln(N[3], zi, yl, w, yl); ln(N[4], w, yl, w, yTop);
+    } else { ln(N[0], 0, b, w - rb, b); ar(N[1], w - rb, b + rb, rb, -Math.PI / 2, 0); ln(N[2], w, b + rb, w, yLow); ln(N[3], w, yLow, w, yLow); ln(N[4], w, yLow, w, yTop); }
+    ar(N[5], w - rS, yTop, rS, 0, Math.PI / 2);                                  // épaulement (grand arrondi sur le capot et le coffre)
+    ln(N[6], w - rS, yB, wg0, yB);                                              // rebord sous les vitres
+    let T1 = [wg0, yB], cz = wg0, cy = yB, a1 = Math.PI / 2, r2 = 0;
+    if (hg > 1e-4) { const L = Math.hypot(wg1 - wg0, hg), uz = (wg1 - wg0) / L, uy = hg / L, sl = (tE - rr - yB - rr * uz) / uy;   // arrondi tangent au toit et aux vitres
+      T1 = [wg0 + sl * uz, yB + sl * uy]; cz = T1[0] - rr * uy; cy = T1[1] + rr * uz; a1 = Math.atan2(-uz, uy); r2 = rr; }
+    ln(N[7], wg0, yB, T1[0], T1[1]);                                            // vitres de côté
+    ar(N[8], cz, cy, r2, a1, Math.PI / 2);                                      // arête du toit
+    const zI = Math.max(cz, 1e-3); seg(N[9], u => { const z = zI * (1 - u); return [z, t - MQ.crown * (1 - Math.cos(Math.PI * z / zI)) / 2]; });   // toit bombé
+    return o; };
+  // Coupes : une par tranche de 2,5 cm, serrées aux bouts (arrondis) et autour des roues (arche tous les 6°, deux fois
+  // deux coupes au même endroit à l'avant et à l'arrière de l'arche : bord vertical net)
+  const R0 = wh => wh.r + LOFT.gap, st = [];
+  for (let i = i0; i <= i1; i++) st.push({ x: a0 + (i + .5) * cell, p: 0 });
+  for (let a = 0; a <= 90 + 1e-6; a += LOFT.endDeg) { const d = MQ.rPlan * (1 - Math.cos(a * Math.PI / 180)); st.push({ x: xMin + d, p: 1 }, { x: xMax - d, p: 1 }); }
+  const arches = (wheels || []).filter(wh => wh.xa - R0(wh) > xMin + MQ.rPlan && wh.xa + R0(wh) < xMax - MQ.rPlan && wh.zo - LOFT.depth > .1);
+  for (const wh of arches) { const R = R0(wh);
+    for (let a = 0; a <= 180 + 1e-6; a += LOFT.archDeg) { const x = wh.xa - R * Math.cos(a * Math.PI / 180);
+      if (a === 0) st.push({ x, p: 2, cut: 0, wh }, { x, p: 2, cut: 0, wh }, { x, p: 2, cut: 1, wh }, { x, p: 2, cut: 1, wh });
+      else if (a > 180 - 1e-6) st.push({ x, p: 2, cut: 1, wh }, { x, p: 2, cut: 1, wh }, { x, p: 2, cut: 0, wh }, { x, p: 2, cut: 0, wh });
+      else st.push({ x, p: 2, cut: 1, wh }); } }
+  st.sort((u, v) => u.x - v.x);
+  const keep = st.filter((u, n) => { if (u.p === 2) return true;
+    for (let m = n - 1; m >= 0 && u.x - st[m].x < .003; m--) if (st[m].p >= u.p) return false;
+    for (let m = n + 1; m < st.length && st[m].x - u.x < .003; m++) if (st[m].p > u.p) return false;
+    return true; });
+  const arcAt = (wh, x) => ({ zin: wh.zo - LOFT.depth, yArc: wh.r + Math.sqrt(Math.max(0, R0(wh) ** 2 - (x - wh.xa) ** 2)) });
+  const notchOf = u => { if (u.p === 2) return u.cut ? arcAt(u.wh, u.x) : null; for (const wh of arches) if (Math.abs(u.x - wh.xa) < R0(wh)) return arcAt(wh, u.x); return null; };
+  const rNear = x => { let r = .3, d = 1e9; for (const wh of arches) if (Math.abs(x - wh.xa) < d) { d = Math.abs(x - wh.xa); r = wh.r; } return r; };
+  const S = keep.length, K = LOFT.cap, nV0 = S * NR + 2 * ((K - 1) * NR + 1), P = new Float64Array(nV0 * 3);
+  const segOf = new Uint8Array(NH), segV = new Uint8Array(nV0).fill(10), staV = new Int16Array(nV0).fill(-1), sideV = new Int8Array(nV0);   // morceau, coupe et côté de chaque sommet
+  { let j = 0; N.forEach((n, m) => { for (let k = 0; k <= n; k++) segOf[j++] = m; }); }
+  keep.forEach((u, si) => { const h = half(u.x, notchOf(u), rNear(u.x)), o = si * NR;
+    for (let k = 0; k < NR; k++) { const j = k < NH ? k : NR - k, q = (o + k) * 3; P[q] = u.x; P[q + 1] = h[j * 2 + 1]; P[q + 2] = (k < NH ? 1 : -1) * h[j * 2];
+      segV[o + k] = segOf[j]; staV[o + k] = si; sideV[o + k] = k < NH ? 1 : -1; } });
+  const slope = Float32Array.from(keep, u => (prof(u.x + .02).t - prof(u.x - .02).t) / .04);   // pente du dessus à chaque coupe
+  const tn = (a, b, c) => { const ux = P[b * 3] - P[a * 3], uy = P[b * 3 + 1] - P[a * 3 + 1], uz = P[b * 3 + 2] - P[a * 3 + 2], vx = P[c * 3] - P[a * 3], vy = P[c * 3 + 1] - P[a * 3 + 1], vz = P[c * 3 + 2] - P[a * 3 + 2];
+    return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx]; };
+  let I = [];
+  for (let si = 0; si < S - 1; si++) for (let k = 0; k < NR; k++) { const k1 = (k + 1) % NR, a = si * NR + k, b = si * NR + k1, c = (si + 1) * NR + k1, d = (si + 1) * NR + k; I.push(a, b, c, a, c, d); }
+  { const yc = .6, xc = (xMin + xMax) / 2; let out = 0;   // triangles tournés vers l'extérieur
+    for (let t = 0; t < I.length; t += 3) { const n = tn(I[t], I[t + 1], I[t + 2]), g = [0, 1, 2].map(e => (P[I[t] * 3 + e] + P[I[t + 1] * 3 + e] + P[I[t + 2] * 3 + e]) / 3); out += n[0] * (g[0] - xc) + n[1] * (g[1] - yc) + n[2] * g[2]; }
+    if (out < 0) for (let t = 0; t < I.length; t += 3) { const x = I[t + 1]; I[t + 1] = I[t + 2]; I[t + 2] = x; } }
+  let vb = S * NR;   // bouts : face plate, anneaux resserrés vers le centre
+  for (const [si, dir] of [[0, -1], [S - 1, 1]]) { const o = si * NR, x = keep[si].x; let cy = 0; for (let k = 0; k < NR; k++) cy += P[(o + k) * 3 + 1]; cy /= NR;
+    const ring = l => l === 0 ? o : vb + (l - 1) * NR, ci = vb + (K - 1) * NR;
+    for (let l = 1; l < K; l++) for (let k = 0; k < NR; k++) { const q = (ring(l) + k) * 3, f = 1 - l / K; P[q] = x; P[q + 1] = cy + (P[(o + k) * 3 + 1] - cy) * f; P[q + 2] = P[(o + k) * 3 + 2] * f; }
+    P[ci * 3] = x; P[ci * 3 + 1] = cy; P[ci * 3 + 2] = 0;
+    const cap = [];
+    for (let l = 0; l < K - 1; l++) for (let k = 0; k < NR; k++) { const k1 = (k + 1) % NR; cap.push(ring(l) + k, ring(l) + k1, ring(l + 1) + k1, ring(l) + k, ring(l + 1) + k1, ring(l + 1) + k); }
+    for (let k = 0; k < NR; k++) cap.push(ring(K - 1) + k, ring(K - 1) + (k + 1) % NR, ci);
+    for (let t = 0; t < cap.length; t += 3) if (tn(cap[t], cap[t + 1], cap[t + 2])[0] * dir < 0) { const x2 = cap[t + 1]; cap[t + 1] = cap[t + 2]; cap[t + 2] = x2; }
+    I = I.concat(cap); vb = ci + 1; }
+  // triangles plats retirés (morceaux de coupe réduits à un point), sommets inutilisés retirés
+  const J = [], fn = [];
+  for (let t = 0; t < I.length; t += 3) { const n = tn(I[t], I[t + 1], I[t + 2]); if (Math.hypot(n[0], n[1], n[2]) > 2e-9) { J.push(I[t], I[t + 1], I[t + 2]); fn.push(n); } }
+  const map = new Int32Array(nV0).fill(-1); let nV = 0; for (const v of J) if (map[v] < 0) map[v] = nV++;
+  const Pa = new Float64Array(nV * 3), Na = new Float64Array(nV * 3), idx = new Uint32Array(J.length), seg = new Uint8Array(nV), sta = new Int16Array(nV), side = new Int8Array(nV);
+  for (let v = 0; v < nV0; v++) if (map[v] >= 0) { for (let e = 0; e < 3; e++) Pa[map[v] * 3 + e] = P[v * 3 + e]; seg[map[v]] = segV[v]; sta[map[v]] = staV[v]; side[map[v]] = sideV[v]; }
+  for (let t = 0; t < J.length; t += 3) { const n = fn[t / 3]; for (let e = 0; e < 3; e++) { const v = map[J[t + e]]; idx[t + e] = v; Na[v * 3] += n[0]; Na[v * 3 + 1] += n[1]; Na[v * 3 + 2] += n[2]; } }
+  // normales : sommets au même endroit (jonctions des morceaux, coupes doublées) fondus, sauf aux cassures de plus de 45°
+  const groups = new Map(), key = v => Math.round(Pa[v * 3] * 1e5) + ',' + Math.round(Pa[v * 3 + 1] * 1e5) + ',' + Math.round(Pa[v * 3 + 2] * 1e5);
+  for (let v = 0; v < nV; v++) { const k = key(v), g = groups.get(k); if (g) g.push(v); else groups.set(k, [v]); }
+  const unit = v => { const l = Math.hypot(Na[v * 3], Na[v * 3 + 1], Na[v * 3 + 2]) || 1; return [Na[v * 3] / l, Na[v * 3 + 1] / l, Na[v * 3 + 2] / l]; }, Nf = Float64Array.from(Na);
+  for (const g of groups.values()) { if (g.length < 2) continue; const us = g.map(unit);
+    g.forEach((v, m) => { let x = 0, y = 0, z = 0; g.forEach((w2, m2) => { if (us[m][0] * us[m2][0] + us[m][1] * us[m2][1] + us[m][2] * us[m2][2] >= LOFT.crease) { x += Na[w2 * 3]; y += Na[w2 * 3 + 1]; z += Na[w2 * 3 + 2]; } }); Nf[v * 3] = x; Nf[v * 3 + 1] = y; Nf[v * 3 + 2] = z; }); }
+  // repères : affichage (centré, avant vers +x) et caméras du scan, comme meshFromField
+  const { roofA, flip } = frontOf(D), { alpha, cx, cz } = align, ca = Math.cos(alpha), sa = Math.sin(alpha);
+  const pos = new Float32Array(nV * 3), orig = new Float32Array(nV * 3), nrm = new Float32Array(nV * 3), onrm = new Float32Array(nV * 3);
+  for (let v = 0; v < nV; v++) { const a = Pa[v * 3], y = Pa[v * 3 + 1], z = Pa[v * 3 + 2], b = bc + z, l = Math.hypot(Nf[v * 3], Nf[v * 3 + 1], Nf[v * 3 + 2]) || 1, na = Nf[v * 3] / l, ny = Nf[v * 3 + 1] / l, nz = Nf[v * 3 + 2] / l;
+    pos[v * 3] = (a - ac) * flip; pos[v * 3 + 1] = y; pos[v * 3 + 2] = z * flip;
+    orig[v * 3] = cx + a * ca - b * sa; orig[v * 3 + 1] = y; orig[v * 3 + 2] = cz + a * sa + b * ca;
+    nrm[v * 3] = na * flip; nrm[v * 3 + 1] = ny; nrm[v * 3 + 2] = nz * flip;
+    onrm[v * 3] = na * ca - nz * sa; onrm[v * 3 + 1] = ny; onrm[v * 3 + 2] = na * sa + nz * ca; }
+  return { pos, orig, nrm, onrm, idx, flip, roofA, coupes: S, arches: arches.length, parts: { seg, sta, side, slope } };
+}
+// Vitres de la carrosserie lisse (v0.24) : sur le morceau « vitres de côté » de chaque coupe, tout ou rien, décidé par
+// coupe et par côté (avis de la majorité des sommets, coupe isolée corrigée par ses voisines) : bords nets au rebord, à
+// l'arête du toit et entre deux coupes (montants). Arête du toit et toit plat : jamais vitrés ; dessus en pente
+// (pare-brise, lunette) et faces des bouts : comme la texture le montre ; carrosserie sous les vitres : jamais vitrée.
+function glassBySections(mm, parts) {
+  const { seg, sta, side, slope } = parts, nV = seg.length, nS = slope.length, G = mm.glass, src = mm.src;
+  const acc = [0, 1].map(() => Array.from({ length: nS }, () => []));
+  for (let i = 0; i < G.length; i++) { const v = src[i]; if (v < nV && seg[v] === 7) acc[side[v] > 0 ? 1 : 0][sta[v]].push(G[i]); }
+  const dec = acc.map(a => { const vt = a.map(l => l.length ? (median(l) > 127 ? 1 : 0) : -1);
+    return vt.map((x, k) => k > 0 && k < nS - 1 && vt[k - 1] >= 0 && vt[k + 1] >= 0 && x >= 0 ? (vt[k - 1] + x + vt[k + 1] >= 2 ? 1 : 0) : Math.max(0, x)); });
+  for (let i = 0; i < G.length; i++) { const v = src[i]; if (v >= nV) continue; const sg = seg[v];
+    if (sg === 7) G[i] = dec[side[v] > 0 ? 1 : 0][sta[v]] ? 255 : 0;
+    else if (sg === 8) G[i] = 0;
+    else if (sg === 9) { if (Math.abs(slope[sta[v]]) < .3) G[i] = 0; }
+    else if (sg < 7) G[i] = 0; }
 }
 // Couleur dominante d'un ensemble de pixels : la teinte la plus fréquente (ou le gris le plus fréquent pour une voiture
 // blanche, grise ou noire), puis la moyenne des pixels de cette teinte entre le 40e et le 85e centile de luminosité
@@ -1210,8 +1373,8 @@ async function scanFrames(F, opts, progress) {
     for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) { const t = clamp(((j + .5) * CELL - wd.sill) / CELL + .5, 0, 1); if (t >= 1) continue;
       for (let i = 0; i < nx; i++) { const q = (k * ny + j) * nx + i; const v = Math.round(F8[q] * t); if (F8[q] >= 128 && v < 128) cutS++; F8[q] = v; } }
     q.fine.sousCut = cutS; }
-  let beltLine = null;
-  if (opts.maquette !== false) { const mqr = maquetteField(disp, wd ? wd.sill : 0); if (mqr) { beltLine = mqr.belt; delete mqr.belt; } q.fine.maquette = mqr; }
+  let beltLine = null, coupes = null;
+  if (opts.maquette !== false) { const mqr = maquetteField(disp, wd ? wd.sill : 0); if (mqr) { beltLine = mqr.belt; coupes = mqr.coupes; delete mqr.belt; delete mqr.coupes; } q.fine.maquette = mqr; }
   if (wd) { carveWells(disp, wd.wheels); q.roues = { rayonsCm: wd.wheels.map(w => Math.round(w.r * 100)), empattementCm: Math.round((wd.wheels[0].xa - wd.wheels[1].xa) * 100), basDeCaisseCm: Math.round(wd.sill * 100), source: wd.source }; }
   else q.roues = 'non trouvées';
   Object.assign(q.fine, { voxels: fv, grid: [nx, ny, nz], symPlaneCm: Math.round((disp.bc - (fine.b0 + nz * CELL / 2)) * 100) });
@@ -1230,7 +1393,10 @@ async function scanFrames(F, opts, progress) {
   // v0.19 : maillage calculé une fois, texture « cuite » sur la carte graphique (toutes les images, visibilité, exposition)
   if (!opts.noBake) try {
     const THREE = await import('three'), MC = await import('three/addons/objects/MarchingCubes.js');
-    const m0 = meshFromField(disp, align, MC, beltLine ? MQ.taubin : LS.taubin, beltLine ? MQ.normales : LS.normales), m = wd ? addRims(m0, wd.wheels, disp, align) : m0, mm = uvCharts(m, 2048);
+    let m0 = null;   // v0.24 : carrosserie lisse construite coupe par coupe (sinon, ou si elle échoue : forme sculptée en cubes)
+    if (coupes && opts.lisse !== false) try { m0 = maquetteMesh(disp, coupes, wd ? wd.wheels : [], align); if (m0) q.fine.lisse = { coupes: m0.coupes, arches: m0.arches }; } catch (e) { q.fine.lisse = 'repli : ' + (e && e.message || e); m0 = null; }
+    if (!m0) m0 = meshFromField(disp, align, MC, beltLine ? MQ.taubin : LS.taubin, beltLine ? MQ.normales : LS.normales);
+    const m = wd ? addRims(m0, wd.wheels, disp, align) : m0, mm = uvCharts(m, 2048);
     if (m.wheels) { const xs = m.wheels.map(w => w.x); dims.wf = Math.max(...xs); dims.wr = Math.min(...xs); }
     // Pas de correction d'exposition : avec 72 images voisines, les écarts se fondent d'eux-mêmes (une correction essayée
     // confondait les reflets avec l'exposition sur la vidéo de test)
@@ -1242,6 +1408,7 @@ async function scanFrames(F, opts, progress) {
     if (beltLine && mm.glass) { const fl = m0.flip, P = mm.pos;   // bas des vitres = ligne de ceinture mesurée ; pas de vitre sur le capot ni le coffre
       for (let v = 0; v < mm.glass.length; v++) { const a = P[v * 3] * fl + disp.ac, yb = beltLine[0] * a + beltLine[1], y = P[v * 3 + 1], si = clamp(Math.floor((a - disp.a0) / CELL), 0, nx - 1);
         if (y < yb + .005 || beltLine[2][si] < .08) mm.glass[v] = 0; else if (y < yb + .03) mm.glass[v] = Math.round(mm.glass[v] * (y - yb - .005) / .025); } }
+    if (m0.parts && mm.glass) glassBySections(mm, m0.parts);
     q.bake = { views: views.length, texelsParMetre: Math.round(mm.texPerM), sommets: mm.pos.length / 3, triangles: mm.idx.length / 3, ms: Math.round(performance.now() - tb),
       textureKo: Math.round(tex.size / 1024), vitresPct: bk.glassShare };
     progress('paint', 1);
@@ -1368,20 +1535,22 @@ function vertexNormals(P, I) { // normales des sommets, pondérées par l'aire d
   for (let v = 0; v < N.length; v += 3) { const l = Math.hypot(N[v], N[v + 1], N[v + 2]) || 1; N[v] /= l; N[v + 1] /= l; N[v + 2] /= l; }
   return N;
 }
+// Sens de la voiture : le toit (le haut de l'habitacle) est presque toujours plus près de l'arrière que de l'avant
+// (capot devant, coffre ou hayon derrière). L'avant est placé du côté des x positifs, comme les dessins de Vigie.
+function frontOf(D) {
+  const { nx, ny, nz, cell, a0, ac, field: F } = D; let jTop = 0;
+  for (let q = 0; q < F.length; q++) if (F[q] >= 128) { const j = ((q / nx) | 0) % ny; if (j > jTop) jTop = j; }
+  let sumA = 0, nA = 0; const jMin = Math.round(jTop * .82);
+  for (let k = 0; k < nz; k++) for (let j = jMin; j < ny; j++) for (let i = 0; i < nx; i++) if (F[(k * ny + j) * nx + i] >= 128) { sumA += a0 + (i + .5) * cell; nA++; }
+  const roofA = nA ? sumA / nA - ac : 0; return { roofA, flip: roofA > .02 ? -1 : 1 };
+}
 // Maillage de la forme : marching cubes, lissage, sens de la voiture (avant vers +x), triangles tournés vers l'extérieur.
 // pos/nrm : repère d'affichage (centré, axe long sur x) ; orig/onrm : repère des caméras du scan.
 function meshFromField(D, align, MC, taubin = 16, nSmooth = 24) {
   const { nx, ny, nz, cell, a0, b0, ac, bc } = D;
   const { P, I } = marching(D.field, nx, ny, nz, 127.5, MC.edgeTable, MC.triTable);
   smoothMesh(P, I, taubin);
-  const nV = P.length / 3, { alpha, cx, cz } = align, ca = Math.cos(alpha), sa = Math.sin(alpha);
-  // Sens de la voiture : le toit (le haut de l'habitacle) est presque toujours plus près de l'arrière que de l'avant
-  // (capot devant, coffre ou hayon derrière). L'avant est placé du côté des x positifs, comme les dessins de Vigie.
-  const F = D.field; let jTop = 0;
-  for (let q = 0; q < F.length; q++) if (F[q] >= 128) { const j = ((q / nx) | 0) % ny; if (j > jTop) jTop = j; }
-  let sumA = 0, nA = 0; const jMin = Math.round(jTop * .82);
-  for (let k = 0; k < nz; k++) for (let j = jMin; j < ny; j++) for (let i = 0; i < nx; i++) if (F[(k * ny + j) * nx + i] >= 128) { sumA += a0 + (i + .5) * cell; nA++; }
-  const roofA = nA ? sumA / nA - ac : 0, flip = roofA > .02 ? -1 : 1;
+  const nV = P.length / 3, { alpha, cx, cz } = align, ca = Math.cos(alpha), sa = Math.sin(alpha), { roofA, flip } = frontOf(D);
   const pos = new Float32Array(nV * 3), orig = new Float32Array(nV * 3);
   for (let v = 0; v < nV; v++) {
     const a = a0 + (P[v * 3] + .5) * cell, y = (P[v * 3 + 1] + .5) * cell, b = b0 + (P[v * 3 + 2] + .5) * cell;
@@ -1743,8 +1912,8 @@ async function bakeTexture(THREE, mm, views, opts) {
 function scanPatch(sh) {
   const rv = this.userData.reveal, gl = !!this.userData.glass, mq = this.userData.maq; sh.uniforms.uReveal = rv.uReveal; sh.uniforms.uScan = rv.uScan;
   sh.uniforms.uMaq = { value: mq.on }; sh.uniforms.uPaintC = { value: mq.paint }; sh.uniforms.uEmi = { value: mq.emi }; sh.uniforms.uWhl = { value: mq.wheels }; sh.uniforms.uNW = { value: mq.nw };
-  sh.vertexShader = (gl ? 'attribute float aGlass;\n' : '') + 'varying float vSY;\nvarying float vGlass;\nvarying vec3 vSP;\nvarying float vUp;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvSY = position.y;\n\tvSP = position;\n\tvUp = normal.y;\n\tvGlass = ' + (gl ? 'aGlass' : '0.0') + ';');
-  sh.fragmentShader = 'uniform float uReveal;\nuniform float uScan;\nuniform float uMaq;\nuniform vec3 uPaintC;\nuniform float uEmi;\nuniform vec4 uWhl[4];\nuniform int uNW;\nvarying float vSY;\nvarying float vGlass;\nvarying vec3 vSP;\nvarying float vUp;\n' + sh.fragmentShader
+  sh.vertexShader = (gl ? 'attribute float aGlass;\n' : '') + 'varying float vSY;\nvarying float vGlass;\nvarying vec3 vSP;\nvarying float vUp;\nvarying float vNX;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvSY = position.y;\n\tvSP = position;\n\tvUp = normal.y;\n\tvNX = normal.x;\n\tvGlass = ' + (gl ? 'aGlass' : '0.0') + ';');
+  sh.fragmentShader = 'uniform float uReveal;\nuniform float uScan;\nuniform float uMaq;\nuniform vec3 uPaintC;\nuniform float uEmi;\nuniform vec4 uWhl[4];\nuniform int uNW;\nvarying float vSY;\nvarying float vGlass;\nvarying vec3 vSP;\nvarying float vUp;\nvarying float vNX;\n' + sh.fragmentShader
     .replace('void main() {', `void main() {
 	if(vSY>uReveal)discard;
 	if(uScan>0.001&&!gl_FrontFacing){float sl=0.75+0.25*step(0.5,fract(gl_FragCoord.y*0.2));gl_FragColor=linearToOutputTexel(vec4((vec3(0.03,0.12,0.21)+vec3(0.16,0.42,0.58)*0.45*uScan)*sl,1.0));return;}`)
@@ -1761,12 +1930,18 @@ function scanPatch(sh) {
 	  for(int w=0;w<4;w++){if(w>=uNW)break;vec4 wh=uWhl[w];if(vSP.z*wh.w<0.25)continue;float d=length(vec2(vSP.x-wh.x,vSP.y-wh.y));
 	    isP=max(isP,smoothstep(wh.y+0.035,wh.y+0.06,d)*(1.0-smoothstep(wh.y+0.15,wh.y+0.22,d)));}   // ailes autour des roues : peinture
 	  isP*=1.0-vGlass;
+	  float well=0.0;   // v0.24 : intérieur des passages de roue (voûte, parois) : plastique noir mat, comme une vraie voiture
+	  for(int w=0;w<4;w++){if(w>=uNW)break;vec4 wh=uWhl[w];if(vSP.z*wh.w<0.0)continue;float R=wh.y+0.035,dx=abs(vSP.x-wh.x);
+	    float inA=vSP.y>wh.y?step(length(vec2(dx,vSP.y-wh.y)),R+0.006):step(dx,R+0.006);
+	    well=max(well,inA*max(max(step(0.3,-vUp),step(0.7,abs(vNX))),step(abs(vSP.z),abs(wh.z)-0.2)));}
+	  isP*=1.0-well;
 	  diffuseColor.rgb=mix(diffuseColor.rgb,uPaintC*mix(1.0,clamp(ka,0.55,1.1),0.35),isP);
 	  totalEmissiveRadiance*=1.0-isP;metalnessFactor=mix(metalnessFactor,0.5,isP);roughnessFactor=mix(roughnessFactor,0.26,isP);
 	  float gE=smoothstep(0.4,0.6,vGlass),fr=(1.0-smoothstep(0.0,0.07,abs(vGlass-0.5)))*step(0.02,vGlass);
 	  diffuseColor.rgb=mix(diffuseColor.rgb,vec3(0.006,0.01,0.018),gE);totalEmissiveRadiance*=1.0-0.75*gE;metalnessFactor=mix(metalnessFactor,0.6,gE);
 	  diffuseColor.rgb=mix(diffuseColor.rgb,vec3(0.004),fr);totalEmissiveRadiance*=1.0-fr;roughnessFactor=mix(roughnessFactor,0.35,fr);
-	  vigieGloss=max(vigieGloss,isP);
+	  diffuseColor.rgb=mix(diffuseColor.rgb,vec3(0.012),well);totalEmissiveRadiance*=1.0-0.9*well;roughnessFactor=mix(roughnessFactor,0.85,well);metalnessFactor*=1.0-well;
+	  vigieGloss=max(vigieGloss,isP)*(1.0-well);
 	}`)
     .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
 	#ifdef USE_CLEARCOAT

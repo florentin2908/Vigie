@@ -21,6 +21,7 @@ Propriétaire : Florentin (compte GitHub `florentin2908`). Textes de l'appli en 
 | `outils/check.py` | Banc de test automatique (dans l'artefact : `banc-de-test.txt`) |
 | `outils/video-de-test.py`, `outils/essai-scan.py` | Vidéo de synthèse d'une voiture filmée en tournant, et mesure de précision du scan 3D |
 | `outils/film-intro.py` | Film de l'intro image par image (temps piloté), pour la revoir et la régler |
+| `outils/mesure-rendu.py` | Qualité de la voiture scannée comparée à la vraie (forme, bosses, flou) + planche d'images ; sert à l'agent d'amélioration (roadmap §5 ter) |
 | `docs/` | Site construit, servi par GitHub Pages. Ne jamais l'éditer à la main |
 
 ## Construire, tester, publier
@@ -31,6 +32,7 @@ npm install --prefix /tmp/vigie-deps three@0.160.0 leaflet@1.9.4   # une fois
 pip install playwright pillow                          # une fois ; ffmpeg doit être installé
 python3 outils/check.py docs /tmp/vigie-out --deps /tmp/vigie-deps  # environ 15 min (fabrique aussi la vidéo de test du scan)
 python3 outils/video-de-test.py /tmp/scan && python3 outils/essai-scan.py /tmp/scan /tmp/scan-out  # précision du scan seul
+python3 outils/mesure-rendu.py /tmp/scan /tmp/mesure --deps /tmp/vigie-deps  # forme, bosses, flou du scan (environ 3 min)
 ```
 
 Le banc doit finir avec 0 erreur et 0 débordement. Il écrit `report.json` et `contact.jpg` (planche de captures à regarder).

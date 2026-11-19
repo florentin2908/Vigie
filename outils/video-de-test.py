@@ -9,18 +9,29 @@ d'une voiture Vigie rouge, sur un parking, à hauteur des phares, en suivant un 
 tremblements de visée. Décor : sol texturé, immeubles, ciel, une autre voiture garée plus loin.
 Sortie : tour-synthetique.mp4 (30 s, H.264) et tour-synthetique.json (angle vrai de chaque image,
 distance, dimensions vraies de la voiture (largeur avec et sans rétroviseurs), champ de la caméra).
+
+Avec --modele voiture.glb --dims L,l,H (mètres, largeur sans rétroviseurs) : la voiture filmée est ce modèle 3D
+(par exemple une vraie voiture courante, pour essayer le scan sur une forme réelle), mis à l'échelle de sa longueur,
+posé au sol, axe long sur x. Le modèle n'est jamais copié dans le dépôt.
 """
-import argparse, asyncio, base64, functools, http.server, json, os, re, socketserver, subprocess, sys, tempfile, threading
+import argparse, asyncio, base64, functools, http.server, json, os, re, shutil, socketserver, subprocess, sys, tempfile, threading
 
 ap = argparse.ArgumentParser()
 ap.add_argument('out')
 ap.add_argument('--deps', default='/tmp/vigie-deps')
 ap.add_argument('--images', type=int, default=300)
 ap.add_argument('--depart', type=float, default=.03, help='point de départ du tour (fraction du tour, 0,03 = devant à gauche ; 0,53 = de l\'autre côté)')
+ap.add_argument('--modele', help='modèle 3D .glb à filmer à la place de la voiture Vigie')
+ap.add_argument('--dims', help='dimensions vraies du modèle : longueur,largeur sans rétroviseurs,hauteur (m)')
+ap.add_argument('--avant', default='auto', help='sens du modèle : +x, -x, +z, -z ou auto (le plus long axe, avant supposé vers +)')
 args = ap.parse_args()
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.abspath(args.out); os.makedirs(OUT, exist_ok=True)
 NM = os.path.join(os.path.abspath(args.deps), 'node_modules')
+MODELE = 'null'
+if args.modele:
+    L, Wc, Hh = (float(v) for v in (args.dims or '4.2,1.75,1.45').split(','))
+    MODELE = json.dumps({'L': L, 'W': Wc, 'H': Hh, 'avant': args.avant, 'nom': os.path.basename(args.modele)})
 
 # Le code 3D de Vigie (silhouettes, éclairage) est repris tel quel depuis index.html, sans le lancement de l'appli
 page = open(os.path.join(ROOT, 'index.html'), encoding='utf-8').read()
@@ -56,7 +67,19 @@ for(const [x,z] of [[-7,6],[8,-5]]){const tr=new THREE.Mesh(new THREE.CylinderGe
   const fo=new THREE.Mesh(new THREE.SphereGeometry(1.5,16,12),new THREE.MeshStandardMaterial({color:0x3f7a3a,roughness:.9}));fo.position.set(x,3.1,z);scene.add(fo);}
 useBody('citadine');const other=buildCar({paint:'#E9EDF4'});other.group.position.set(-6.5,0,-8.5);other.group.rotation.y=.4;scene.add(other.group);
 // La voiture scannée
-useBody('compacte');const car=buildCar({paint:'#B3121F'});scene.add(car.group);
+const MODELE=%(modele)s;let car,caisseW=null;
+if(MODELE){const {GLTFLoader}=await import('three/addons/loaders/GLTFLoader.js');const gl=await new GLTFLoader().loadAsync('modele.glb');
+  const g=new THREE.Group(),m=gl.scene;g.add(m);
+  let b=new THREE.Box3().setFromObject(m),sz=b.getSize(new THREE.Vector3());
+  const ax=MODELE.avant!=='auto'?MODELE.avant:(sz.x>=sz.z?'+x':'+z');
+  m.rotation.y={'+x':0,'-x':Math.PI,'+z':-Math.PI/2,'-z':Math.PI/2}[ax];m.updateMatrixWorld(true);
+  b=new THREE.Box3().setFromObject(m);sz=b.getSize(new THREE.Vector3());
+  const k=MODELE.L/sz.x;m.scale.multiplyScalar(k);m.updateMatrixWorld(true);b=new THREE.Box3().setFromObject(m);const c=b.getCenter(new THREE.Vector3());
+  m.position.x-=c.x;m.position.z-=c.z;m.position.y-=b.min.y;
+  m.traverse(o=>{if(o.isMesh){o.castShadow=false;o.frustumCulled=false;}});
+  car={group:g};caisseW=MODELE.W;}
+else{useBody('compacte');car=buildCar({paint:'#B3121F'});}
+scene.add(car.group);
 const box=new THREE.Box3().setFromObject(car.group),size=box.getSize(new THREE.Vector3()),ctr=box.getCenter(new THREE.Vector3());
 // Masque vrai : la voiture en blanc sur noir
 const white=new THREE.MeshBasicMaterial({color:0xffffff}),maskScene=new THREE.Scene();maskScene.background=new THREE.Color(0x000000);
@@ -71,8 +94,8 @@ function pathAt(u){ // u ∈ [0,1) le long du chemin, sens trigonométrique vu d
   for(const [len,k,p0,q] of segs){if(d<=len){if(k==='s')return [p0[0]+q[0]*d,p0[1]+q[1]*d];const a=q+d/off;return [p0[0]+Math.cos(a)*off,p0[1]+Math.sin(a)*off];}d-=len;}
   return pathAt(0);
 }
-const caisse=new THREE.Box3().setFromObject(car.group.children[0]).getSize(new THREE.Vector3()); // largeur de caisse, sans les rétroviseurs
-window.__frames=[];window.__truth={n:N,hfov:HFOV,w:W,h:H,dims:{L:size.x,W:size.z,H:size.y,Wcaisse:caisse.z},center:[ctr.x,ctr.y,ctr.z],frames:[]};
+const caisse=caisseW!=null?caisseW:new THREE.Box3().setFromObject(car.group.children[0]).getSize(new THREE.Vector3()).z; // largeur de caisse, sans les rétroviseurs
+window.__frames=[];window.__truth={n:N,hfov:HFOV,w:W,h:H,dims:{L:size.x,W:size.z,H:size.y,Wcaisse:caisse},center:[ctr.x,ctr.y,ctr.z],frames:[],modele:MODELE};
 const tgt=new THREE.Vector3(ctr.x,.65,ctr.z);
 window.__render=function(i){
   const u=(i/N+%(depart)f)%%1,[x,z]=pathAt(u),y=.85+Math.sin(i*.9)*.02;
@@ -98,8 +121,9 @@ async def main():
     html = ('<!doctype html><html><body style="margin:0;background:#000"><script type="importmap">'
             '{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}'
             '</script><script>window.VigieState={studio:false,accent:"#5AC8FA",floor:"#5AC8FA",tint:"#ffffff"};</script>'
-            '<script type="module">' + mod + (SCENE % {'n': args.images, 'depart': args.depart}) + '</script></body></html>')
+            '<script type="module">' + mod + (SCENE % {'n': args.images, 'depart': args.depart, 'modele': MODELE}) + '</script></body></html>')
     open(os.path.join(tmp, 'index.html'), 'w', encoding='utf-8').write(html)
+    if args.modele: shutil.copy(args.modele, os.path.join(tmp, 'modele.glb'))
     httpd = socketserver.TCPServer(('127.0.0.1', 0), functools.partial(Q, directory=tmp))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f'http://127.0.0.1:{httpd.server_address[1]}/'
