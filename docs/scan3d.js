@@ -864,10 +864,95 @@ function tautSides(g, nx, ny, nz, mid, jMin) {
       for (let i = 0; i < nx; i++) { const q = (k * ny + j) * nx + i; if (g[q] > cap) { if (g[q] >= .5 && cap < .5) cut++; g[q] = cap; } } } }
   return { cut, levels: Array.from(lv).filter(v => v >= 0).length };
 }
+// Carrosserie « maquette » (v0.23) : chaque tranche de la forme sculptée est mesurée (bas, haut au milieu, demi-largeur
+// à chaque hauteur), puis remplacée par une coupe de voiture nette : bas de caisse arrondi, flanc droit, épaulement à la
+// ligne de ceinture, vitres qui rentrent vers le toit, toit plat à arêtes arrondies (capot et coffre : arêtes plus
+// douces). La ligne de ceinture est mesurée (coude de la demi-largeur, droite le long de la voiture) ; l'angle de rentrée
+// des vitres est mesuré puis borné à 10-20° (la sculpture arrondit trop le haut). Profils lissés le long de la voiture
+// (médiane, puis moyenne gaussienne qui garde les cassures nettes : hayon, pare-brise) ; bouts arrondis comme des
+// boucliers. La surface étant déjà nette, le maillage n'est presque plus lissé (Taubin 10, normales 8 : arêtes nettes).
+const MQ = { taubin: 10, normales: 8, sigma: 9, rb: .07, rs: .025, rr: .055, rt: .13, ledge: .035, crown: .015, tanMin: Math.tan(10 * Math.PI / 180), tanMax: Math.tan(20 * Math.PI / 180), rPlan: .18, rTop: .12, rBot: .1 };
+function maquetteField(D, sill) {
+  const { nx, ny, nz, cell, field: F, b0, bc } = D, kmid = (bc - b0) / cell - .5, NXY = nx * ny;
+  const W = new Float32Array(nx * ny).fill(-1), top = new Float32Array(nx).fill(NaN), bot = new Float32Array(nx).fill(NaN);
+  for (let i = 0; i < nx; i++) {
+    let jt = -1, jb = ny;
+    for (let j = 0; j < ny; j++) {
+      for (let k = nz - 1; k > kmid; k--) { const v = F[k * NXY + j * nx + i]; if (v >= 128) { const o = k + 1 < nz ? F[(k + 1) * NXY + j * nx + i] : 0;
+        W[i * ny + j] = (k - kmid + (v - 127.5) / Math.max(1, v - o)) * cell; if (j < jb) jb = j; break; } }
+      for (let k = Math.max(0, Math.floor(kmid - 6)); k <= Math.min(nz - 1, Math.ceil(kmid + 6)); k++) if (F[k * NXY + j * nx + i] >= 128) { jt = j; break; }
+    }
+    if (jt >= 0) { top[i] = (jt + 1) * cell; bot[i] = jb * cell; }
+  }
+  const yv = j => (j + .5) * cell, av = i => D.a0 + (i + .5) * cell;
+  let i0 = nx, i1 = -1; for (let i = 0; i < nx; i++) if (!isNaN(top[i])) { if (i < i0) i0 = i; if (i > i1) i1 = i; }
+  if (i1 - i0 < 40) return null;
+  let tMax = 0; for (let i = i0; i <= i1; i++) if (top[i] > tMax) tMax = top[i];
+  // ligne de ceinture : coude de la demi-largeur sur les tranches d'habitacle, puis droite robuste le long de la voiture
+  const bx = [], by = [];
+  for (let i = i0; i <= i1; i++) { if (!(top[i] >= .9 * tMax)) continue; const b = bot[i], t = top[i]; let w0 = 0;
+    for (let j = 0; j < ny; j++) { const y = yv(j); if (y >= b + .1 && y <= b + .6 * (t - b) && W[i * ny + j] > w0) w0 = W[i * ny + j]; }
+    for (let j = 0; j < ny; j++) { const y = yv(j); if (y > b + .45 * (t - b) && W[i * ny + j] > 0 && W[i * ny + j] < w0 - .04) { bx.push(av(i)); by.push(y); break; } } }
+  let ka = 0, kb = bx.length ? median(by) : .62 * tMax;
+  for (let it = 0; it < 4 && bx.length >= 10; it++) {
+    const res = bx.map((x, n) => Math.abs(ka * x + kb - by[n])), lim = Math.max(.02, [...res].sort((a, b) => a - b)[Math.floor(res.length * .7)]);
+    let sx = 0, sy = 0, sxx = 0, sxy = 0, m = 0;
+    bx.forEach((x, n) => { if (res[n] > lim) return; sx += x; sy += by[n]; sxx += x * x; sxy += x * by[n]; m++; });
+    const den = m * sxx - sx * sx; if (m < 5 || Math.abs(den) < 1e-9) break;
+    ka = clamp((m * sxy - sx * sy) / den, -.03, .03); kb = (sy - ka * sx) / m;
+  }
+  const belt = x => ka * x + kb;
+  // demi-largeur de caisse : la plus grande entre le bas + 10 cm et la ceinture - 5 cm
+  const wb = new Float32Array(nx).fill(NaN);
+  for (let i = i0; i <= i1; i++) { if (isNaN(top[i])) continue; const hi = Math.min(top[i] - .05, belt(av(i)) - .05); let w0 = -1;
+    for (let j = 0; j < ny; j++) { const y = yv(j); if (y >= bot[i] + .1 && y <= hi && W[i * ny + j] > w0) w0 = W[i * ny + j]; }
+    if (w0 > 0) wb[i] = w0; }
+  const smooth = (v, r, sv) => { const o = Float32Array.from(v);   // médiane, puis moyenne gaussienne ; sv : écart de valeur toléré (bord net gardé : filtre bilatéral)
+    for (let i = 0; i < nx; i++) { const a = []; for (let d = -r; d <= r; d++) if (i + d >= 0 && i + d < nx && !isNaN(v[i + d])) a.push(v[i + d]); if (a.length && !isNaN(v[i])) o[i] = median(a); }
+    const o2 = Float32Array.from(o), sg = MQ.sigma;   // puis moyenne gaussienne (sigma en tranches de 2,5 cm)
+    for (let i = 0; i < nx; i++) { if (isNaN(o[i])) continue; let sm = 0, n = 0;
+      for (let d = -3 * sg; d <= 3 * sg; d++) if (i + d >= 0 && i + d < nx && !isNaN(o[i + d])) { const dv = sv ? (o[i + d] - o[i]) / sv : 0, g = Math.exp(-d * d / (2 * sg * sg) - dv * dv / 2); sm += o[i + d] * g; n += g; } o2[i] = sm / n; }
+    return o2; };
+  const T = smooth(top, 4, .03), B = smooth(bot, 4, .03), WB = smooth(wb, 4);
+  for (const [ie, dir] of [[i0, 1], [i1, -1]]) {
+    const ir = ie + dir * Math.round(MQ.rPlan / cell), wRef = WB[ir], tRef = T[ie + dir * Math.round(MQ.rTop / cell)], bRef = B[ie + dir * Math.round(MQ.rBot / cell)];
+    for (let n = 0; n * cell < MQ.rPlan; n++) { const i = ie + dir * n, d = (n + .5) * cell; if (isNaN(WB[i])) continue;
+      if (!isNaN(wRef)) WB[i] = Math.min(WB[i], wRef - MQ.rPlan + Math.sqrt(Math.max(0, MQ.rPlan ** 2 - (MQ.rPlan - d) ** 2)));
+      if (d < MQ.rTop && !isNaN(tRef)) T[i] = Math.min(T[i], tRef - MQ.rTop + Math.sqrt(Math.max(0, MQ.rTop ** 2 - (MQ.rTop - d) ** 2)));
+      if (d < MQ.rBot && !isNaN(bRef)) B[i] = Math.max(B[i], bRef + MQ.rBot - Math.sqrt(Math.max(0, MQ.rBot ** 2 - (MQ.rBot - d) ** 2))); } }
+  const G = new Uint8Array(F.length), kz = new Float32Array(nz); for (let k = 0; k < nz; k++) kz[k] = Math.abs(k - kmid) * cell;
+  let cab = 0;
+  for (let i = i0; i <= i1; i++) {
+    const t = T[i], b = Math.max(B[i], sill || 0), w = WB[i]; if (isNaN(t) || isNaN(w) || t - b < .1) continue;
+    const bl = belt(av(i)), h = t - bl, f = clamp(h / .25, 0, 1);   // f : part d'habitacle (0 sur le capot et le coffre)
+    let wg0 = w, wg1 = w, rr = Math.min(MQ.rt, (t - b) / 3);
+    if (h > .02) { wg0 = w - MQ.ledge * f; const jj = Math.floor((t - .12) / cell), wm = jj >= 0 && jj < ny && W[i * ny + jj] > 0 ? W[i * ny + jj] : wg0;
+      wg1 = wg0 - f * clamp(wg0 - wm, h * MQ.tanMin, h * MQ.tanMax); rr = MQ.rr + (1 - f) * (MQ.rt - MQ.rr); if (f > .5) cab++; }
+    const rb = Math.min(MQ.rb, (t - b) / 3), rs = MQ.rs, top0 = Math.min(bl, t);
+    const half = y => {   // demi-largeur de la coupe à la hauteur y
+      if (y < b || y > t) return -1;
+      if (y < b + rb) return w - rb + Math.sqrt(Math.max(0, rb * rb - (b + rb - y) ** 2));
+      if (h <= .02) { const r = Math.min(MQ.rt, (t - b) / 3); return y > t - r ? w - r + Math.sqrt(Math.max(0, r * r - (y - (t - r)) ** 2)) : w; }
+      if (y < top0 - rs) return w;
+      if (y < top0) return w - rs * f + Math.sqrt(Math.max(0, rs * rs - (y - (top0 - rs)) ** 2)) * f + (1 - f) * 0;
+      const r = Math.min(rr, h / 2);
+      if (y < t - r) return wg0 + (wg1 - wg0) * (y - bl) / Math.max(1e-3, t - r - bl);
+      return wg1 - r + Math.sqrt(Math.max(0, r * r - (y - (t - r)) ** 2)); };
+    for (let j = 0; j < ny; j++) { const y = yv(j), hw = half(y); if (hw <= 0) continue;
+      for (let k = 0; k < nz; k++) { const z = kz[k], tz = t - MQ.crown * Math.min(1, z / Math.max(.3, hw)) ** 2;
+        const v = clamp(.5 + (hw - z) / cell, 0, 1) * clamp(.5 + (tz - y) / cell, 0, 1); if (v > 0) G[k * NXY + j * nx + i] = Math.round(v * 255); } }
+  }
+  // transitions douces d'une tranche à l'autre
+  const Gf = new Float32Array(G.length); for (let n = 0; n < G.length; n++) Gf[n] = G[n] / 255;
+  for (let p = 0; p < 4; p++) blur1(Gf, nx, ny, nz, 0);
+  for (let n = 0; n < G.length; n++) F[n] = Math.round(clamp(Gf[n], 0, 1) * 255);
+  const cabH = new Float32Array(nx).fill(-1); for (let i = i0; i <= i1; i++) if (!isNaN(T[i])) cabH[i] = T[i] - belt(av(i));   // hauteur d'habitacle au-dessus de la ceinture
+  return { ceintureM: Math.round(kb * 100) / 100, penteCeinture: Math.round(ka * 1000) / 1000, tranchesHabitacle: cab, belt: [ka, kb, cabH] };
+}
 // Couleur dominante d'un ensemble de pixels : la teinte la plus fréquente (ou le gris le plus fréquent pour une voiture
 // blanche, grise ou noire), puis la moyenne des pixels de cette teinte entre le 40e et le 85e centile de luminosité
 // (ni les ombres, ni les reflets du ciel).
-function dominant(px) {
+function dominant(px, lo = .4, hi = .85) {
   if (!px.length) return null;
   const key = (r, g, b) => { const mx = Math.max(r, g, b), mn = Math.min(r, g, b), sat = mx ? (mx - mn) / mx : 0;
     if (sat < .22 || mx < 40) return 200 + Math.min(7, mx >> 5);
@@ -878,7 +963,7 @@ function dominant(px) {
   let best = 0; for (let k = 1; k < 208; k++) if (cnt[k] > cnt[best]) best = k;
   const sel = []; for (let i = 0; i < keys.length; i++) if (keys[i] === best) sel.push(i);
   sel.sort((x, y) => (px[x * 3] * .3 + px[x * 3 + 1] * .59 + px[x * 3 + 2] * .11) - (px[y * 3] * .3 + px[y * 3 + 1] * .59 + px[y * 3 + 2] * .11));
-  let r = 0, g = 0, b = 0, n = 0; for (let k = Math.floor(sel.length * .4); k < Math.max(Math.floor(sel.length * .4) + 1, Math.floor(sel.length * .85)); k++) { const i = sel[k]; r += px[i * 3]; g += px[i * 3 + 1]; b += px[i * 3 + 2]; n++; }
+  let r = 0, g = 0, b = 0, n = 0; for (let k = Math.floor(sel.length * lo); k < Math.max(Math.floor(sel.length * lo) + 1, Math.floor(sel.length * hi)); k++) { const i = sel[k]; r += px[i * 3]; g += px[i * 3 + 1]; b += px[i * 3 + 2]; n++; }
   return n ? [r / n / 255, g / n / 255, b / n / 255] : null;
 }
 // Couleur de la peinture : portières, entre les vitres et les roues (loin des bords de la silhouette)
@@ -888,7 +973,7 @@ function paintColor(masks, smalls, idxs, SW, SH) {
     for (let y = Math.max(2, Math.round(st.y0 + st.h * .4)); y <= Math.min(SH - 3, Math.round(st.y0 + st.h * .75)); y += 2)
       for (let x = Math.max(2, st.x0); x <= Math.min(SW - 3, st.x1); x += 2) { const p = y * SW + x;
         if (m[p] && m[p - 2] && m[p + 2] && m[p - 2 * SW] && m[p + 2 * SW]) px.push(d[p * 4], d[p * 4 + 1], d[p * 4 + 2]); } }
-  return dominant(px);
+  return dominant(px, .55, .9);   // v0.23 : la peinture bien éclairée (sa vraie couleur de jour), pas ses zones d'ombre
 }
 // Couleur du haut de la voiture (toit) : juste sous le bord haut de la silhouette, sur le milieu de sa longueur
 function roofColor(masks, smalls, idxs, SW, SH) {
@@ -1125,6 +1210,8 @@ async function scanFrames(F, opts, progress) {
     for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) { const t = clamp(((j + .5) * CELL - wd.sill) / CELL + .5, 0, 1); if (t >= 1) continue;
       for (let i = 0; i < nx; i++) { const q = (k * ny + j) * nx + i; const v = Math.round(F8[q] * t); if (F8[q] >= 128 && v < 128) cutS++; F8[q] = v; } }
     q.fine.sousCut = cutS; }
+  let beltLine = null;
+  if (opts.maquette !== false) { const mqr = maquetteField(disp, wd ? wd.sill : 0); if (mqr) { beltLine = mqr.belt; delete mqr.belt; } q.fine.maquette = mqr; }
   if (wd) { carveWells(disp, wd.wheels); q.roues = { rayonsCm: wd.wheels.map(w => Math.round(w.r * 100)), empattementCm: Math.round((wd.wheels[0].xa - wd.wheels[1].xa) * 100), basDeCaisseCm: Math.round(wd.sill * 100), source: wd.source }; }
   else q.roues = 'non trouvées';
   Object.assign(q.fine, { voxels: fv, grid: [nx, ny, nz], symPlaneCm: Math.round((disp.bc - (fine.b0 + nz * CELL / 2)) * 100) });
@@ -1143,7 +1230,7 @@ async function scanFrames(F, opts, progress) {
   // v0.19 : maillage calculé une fois, texture « cuite » sur la carte graphique (toutes les images, visibilité, exposition)
   if (!opts.noBake) try {
     const THREE = await import('three'), MC = await import('three/addons/objects/MarchingCubes.js');
-    const m0 = meshFromField(disp, align, MC, LS.taubin, LS.normales), m = wd ? addRims(m0, wd.wheels, disp, align) : m0, mm = uvCharts(m, 2048);
+    const m0 = meshFromField(disp, align, MC, beltLine ? MQ.taubin : LS.taubin, beltLine ? MQ.normales : LS.normales), m = wd ? addRims(m0, wd.wheels, disp, align) : m0, mm = uvCharts(m, 2048);
     if (m.wheels) { const xs = m.wheels.map(w => w.x); dims.wf = Math.max(...xs); dims.wr = Math.min(...xs); }
     // Pas de correction d'exposition : avec 72 images voisines, les écarts se fondent d'eux-mêmes (une correction essayée
     // confondait les reflets avec l'exposition sur la vidéo de test)
@@ -1152,6 +1239,9 @@ async function scanFrames(F, opts, progress) {
     const tb = performance.now();
     const bk = await bakeTexture(THREE, mm, views, { size: 2048, SW, SH, fN: [fpx / SW, fpx / SH], paint, roof, H: dims.H, lumRef, wheels: m.wheels, soft: opts.soft, progress: k => progress('paint', k) });
     const tex = bk.blob; mm.glass = bk.glass;
+    if (beltLine && mm.glass) { const fl = m0.flip, P = mm.pos;   // bas des vitres = ligne de ceinture mesurée ; pas de vitre sur le capot ni le coffre
+      for (let v = 0; v < mm.glass.length; v++) { const a = P[v * 3] * fl + disp.ac, yb = beltLine[0] * a + beltLine[1], y = P[v * 3 + 1], si = clamp(Math.floor((a - disp.a0) / CELL), 0, nx - 1);
+        if (y < yb + .005 || beltLine[2][si] < .08) mm.glass[v] = 0; else if (y < yb + .03) mm.glass[v] = Math.round(mm.glass[v] * (y - yb - .005) / .025); } }
     q.bake = { views: views.length, texelsParMetre: Math.round(mm.texPerM), sommets: mm.pos.length / 3, triangles: mm.idx.length / 3, ms: Math.round(performance.now() - tb),
       textureKo: Math.round(tex.size / 1024), vitresPct: bk.glassShare };
     progress('paint', 1);
@@ -1571,7 +1661,7 @@ async function bakeTexture(THREE, mm, views, opts) {
         float isP=smoothstep(0.22,0.1,rel)*smoothstep(0.25,0.45,ka)*(1.0-vRefl)*(1.0-vSharp);
         // v0.22 : reflets clairs figés retirés aussi de la teinte (a) : la peinture ne dépasse plus sa vraie couleur, sauf un
         // peu sur ce qui regarde le ciel (capot, toit) ; le vernis recrée les reflets à l'affichage
-        float cap=1.0+0.22*clamp(normalize(vN).y,0.0,1.0),kc=ka>cap?cap+(ka-cap)*0.15:ka;
+        float cap=1.0+0.22*clamp(normalize(vN).y,0.0,1.0),kc=mix(ka>cap?cap+(ka-cap)*0.15:ka,ka,smoothstep(1.5,1.9,ka));   // au-delà de 1,6 fois la peinture : un feu
         seen=mix(seen,kc*uPaint,isP);
         float conf=smoothstep(0.14,0.34,cm);
         vec3 prior=mix(uPaint,uRoof,smoothstep(0.70*uH,0.86*uH,vY));   // ce qu'aucune image ne voit : peinture en bas, toit en haut
@@ -1651,26 +1741,43 @@ async function bakeTexture(THREE, mm, views, opts) {
 // (émissive : pas d'éclairage ajouté par-dessus les vraies lumières de la vidéo) ; le vernis ajoute les reflets qui bougent
 // avec la voiture. Pneus et plastiques noirs du bas restent mats. Uniformes uReveal / uScan : faisceau du scanner de l'intro.
 function scanPatch(sh) {
-  const rv = this.userData.reveal, gl = !!this.userData.glass; sh.uniforms.uReveal = rv.uReveal; sh.uniforms.uScan = rv.uScan;
-  sh.vertexShader = (gl ? 'attribute float aGlass;\n' : '') + 'varying float vSY;\nvarying float vGlass;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvSY = position.y;\n\tvGlass = ' + (gl ? 'aGlass' : '0.0') + ';');
-  sh.fragmentShader = 'uniform float uReveal;\nuniform float uScan;\nvarying float vSY;\nvarying float vGlass;\n' + sh.fragmentShader
+  const rv = this.userData.reveal, gl = !!this.userData.glass, mq = this.userData.maq; sh.uniforms.uReveal = rv.uReveal; sh.uniforms.uScan = rv.uScan;
+  sh.uniforms.uMaq = { value: mq.on }; sh.uniforms.uPaintC = { value: mq.paint }; sh.uniforms.uEmi = { value: mq.emi }; sh.uniforms.uWhl = { value: mq.wheels }; sh.uniforms.uNW = { value: mq.nw };
+  sh.vertexShader = (gl ? 'attribute float aGlass;\n' : '') + 'varying float vSY;\nvarying float vGlass;\nvarying vec3 vSP;\nvarying float vUp;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvSY = position.y;\n\tvSP = position;\n\tvUp = normal.y;\n\tvGlass = ' + (gl ? 'aGlass' : '0.0') + ';');
+  sh.fragmentShader = 'uniform float uReveal;\nuniform float uScan;\nuniform float uMaq;\nuniform vec3 uPaintC;\nuniform float uEmi;\nuniform vec4 uWhl[4];\nuniform int uNW;\nvarying float vSY;\nvarying float vGlass;\nvarying vec3 vSP;\nvarying float vUp;\n' + sh.fragmentShader
     .replace('void main() {', `void main() {
 	if(vSY>uReveal)discard;
 	if(uScan>0.001&&!gl_FrontFacing){float sl=0.75+0.25*step(0.5,fract(gl_FragCoord.y*0.2));gl_FragColor=linearToOutputTexel(vec4((vec3(0.03,0.12,0.21)+vec3(0.16,0.42,0.58)*0.45*uScan)*sl,1.0));return;}`)
     .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 	float vgL=dot(totalEmissiveRadiance,vec3(0.3,0.59,0.11));
 	float vgS=max(max(totalEmissiveRadiance.r,totalEmissiveRadiance.g),totalEmissiveRadiance.b)-min(min(totalEmissiveRadiance.r,totalEmissiveRadiance.g),totalEmissiveRadiance.b);
-	float vigieGloss=1.0-(1.0-smoothstep(0.32,0.5,vSY))*(1.0-smoothstep(0.03,0.09,vgL))*(1.0-smoothstep(0.05,0.15,vgS));`)
+	float vigieGloss=1.0-(1.0-smoothstep(0.32,0.5,vSY))*(1.0-smoothstep(0.03,0.09,vgL))*(1.0-smoothstep(0.05,0.15,vgS));
+	if(uMaq>0.5){
+	  vec3 tc=totalEmissiveRadiance/uEmi;float pp=max(dot(uPaintC,uPaintC),1e-5),ka=dot(tc,uPaintC)/pp;
+	  float res=length(tc-ka*uPaintC)/(length(tc)+0.02),darkP=step(dot(uPaintC,vec3(0.3,0.59,0.11)),0.025);
+	  float isP=mix(smoothstep(0.26,0.1,res)*smoothstep(0.18,0.42,ka)*(1.0-smoothstep(1.4,1.8,ka)),smoothstep(0.06,0.02,length(tc-uPaintC)),darkP);
+	  float lum=dot(tc,vec3(0.3,0.59,0.11)),pl=max(dot(uPaintC,vec3(0.3,0.59,0.11)),0.004);
+	  isP=max(isP,smoothstep(0.55,0.8,vUp)*smoothstep(0.08,0.2,lum/pl)*(1.0-smoothstep(2.2,3.2,lum/pl))*(1.0-smoothstep(0.2,0.4,vGlass)));   // capot, toit, coffre : reflets du ciel, du pare-brise
+	  for(int w=0;w<4;w++){if(w>=uNW)break;vec4 wh=uWhl[w];if(vSP.z*wh.w<0.25)continue;float d=length(vec2(vSP.x-wh.x,vSP.y-wh.y));
+	    isP=max(isP,smoothstep(wh.y+0.035,wh.y+0.06,d)*(1.0-smoothstep(wh.y+0.15,wh.y+0.22,d)));}   // ailes autour des roues : peinture
+	  isP*=1.0-vGlass;
+	  diffuseColor.rgb=mix(diffuseColor.rgb,uPaintC*mix(1.0,clamp(ka,0.55,1.1),0.35),isP);
+	  totalEmissiveRadiance*=1.0-isP;metalnessFactor=mix(metalnessFactor,0.5,isP);roughnessFactor=mix(roughnessFactor,0.26,isP);
+	  float gE=smoothstep(0.4,0.6,vGlass),fr=(1.0-smoothstep(0.0,0.07,abs(vGlass-0.5)))*step(0.02,vGlass);
+	  diffuseColor.rgb=mix(diffuseColor.rgb,vec3(0.006,0.01,0.018),gE);totalEmissiveRadiance*=1.0-0.75*gE;metalnessFactor=mix(metalnessFactor,0.6,gE);
+	  diffuseColor.rgb=mix(diffuseColor.rgb,vec3(0.004),fr);totalEmissiveRadiance*=1.0-fr;roughnessFactor=mix(roughnessFactor,0.35,fr);
+	  vigieGloss=max(vigieGloss,isP);
+	}`)
     .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
 	#ifdef USE_CLEARCOAT
 	material.clearcoat=mix(material.clearcoat*vigieGloss,0.85,vGlass);
 	material.clearcoatRoughness=mix(material.clearcoatRoughness,0.1,vGlass);
 	#endif
-	material.roughness=mix(mix(0.75,material.roughness,vigieGloss),0.16,vGlass);`)
+	material.roughness=mix(mix(0.75,material.roughness,vigieGloss),mix(0.16,0.07,uMaq),vGlass);`)
     .replace('#include <opaque_fragment>', `#include <opaque_fragment>
 	gl_FragColor.rgb=mix(gl_FragColor.rgb,gl_FragColor.rgb*0.55+vec3(0.1,0.22,0.3),uScan*0.35)+vec3(0.45,0.92,1.0)*exp(-abs(uReveal-vSY)*28.0)*uScan*2.4;`);
 }
-const LOOK = { env: .55, spec: .5, rough: .38, coat: 1, coatRough: .08, emi: 1.15 };   // vernis plein, choisi sur la vidéo de test (v0.19)
+const LOOK = { env: .55, spec: .5, rough: .38, coat: 1, coatRough: .08, emi: 1.15, maq: 1, envMaq: 1.1 };   // vernis plein (v0.19) ; maq : peinture de studio (v0.23)
 async function buildV3(THREE, rec, look) {
   const L = Object.assign({}, LOOK, look || {});
   const M = rec.mesh, g = new THREE.BufferGeometry();
@@ -1681,14 +1788,16 @@ async function buildV3(THREE, rec, look) {
     im.onload = () => { const t = new THREE.Texture(im); t.flipY = true; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.needsUpdate = true; URL.revokeObjectURL(u); res(t); };
     im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('image')); }; im.src = u; });
   const mk = rv => { const m = new THREE.MeshPhysicalMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: tex, metalness: 0, roughness: L.rough,
-      specularIntensity: L.spec, clearcoat: L.coat, clearcoatRoughness: L.coatRough, envMapIntensity: L.env, emissiveIntensity: L.emi, side: THREE.DoubleSide, toneMapped: false });
-    m.userData.reveal = rv; m.userData.glass = hasGlass; m.onBeforeCompile = scanPatch; m.customProgramCacheKey = () => 'vigie-scan-v3' + (hasGlass ? '-vitres' : ''); return m; };
+      specularIntensity: L.spec, clearcoat: L.coat, clearcoatRoughness: L.coatRough, envMapIntensity: L.maq ? L.envMaq : L.env, emissiveIntensity: L.emi, side: THREE.DoubleSide, toneMapped: false });
+    m.userData.reveal = rv; m.userData.glass = hasGlass; m.userData.maq = { on: L.maq ? 1 : 0, paint: new THREE.Color().setRGB(...(rec.paint || [.6, .6, .6]), THREE.SRGBColorSpace), emi: L.emi,
+      wheels: [0, 1, 2, 3].map(n => { const w = (rec.wheels || [])[n]; return w ? new THREE.Vector4(w.x, w.r, w.z, w.s) : new THREE.Vector4(); }), nw: Math.min(4, (rec.wheels || []).length) };
+    m.onBeforeCompile = scanPatch; m.customProgramCacheKey = () => 'vigie-scan-v3' + (hasGlass ? '-vitres' : '') + (L.maq ? '-maq' : ''); return m; };
   // Pneus : caoutchouc noir (une roue est une roue) ; la jante, elle, vient de tes images (disque de la texture)
   const tires = (rec.wheels || []).map(w => { const r = w.r, tw = clamp(.115 * rec.dims.W, .17, .25), h = tw / 2;
     const prof = [[.74 * r, -h + .012], [.9 * r, -h], [r - .025, -h + .02], [r, -h + .06], [r, h - .06], [r - .025, h - .02], [.9 * r, h], [.74 * r, h - .012]].map(([x, y]) => new THREE.Vector2(x, y));
     const tg = new THREE.LatheGeometry(prof, 56); tg.rotateX(Math.PI / 2); return { w, tg, h }; });
   const rubber = rv => { const m = new THREE.MeshPhysicalMaterial({ color: 0x0b0c0e, roughness: .8, metalness: 0, envMapIntensity: .5, side: THREE.DoubleSide });
-    m.userData.reveal = rv; m.onBeforeCompile = scanPatch; m.customProgramCacheKey = () => 'vigie-scan-v3-pneu'; return m; };
+    m.userData.reveal = rv; m.userData.maq = { on: 0, paint: new THREE.Color(0, 0, 0), emi: 1, wheels: [0, 1, 2, 3].map(() => new THREE.Vector4()), nw: 0 }; m.onBeforeCompile = scanPatch; m.customProgramCacheKey = () => 'vigie-scan-v3-pneu'; return m; };
   const assemble = rv => { const m = mk(rv), gr = new THREE.Group(); gr.add(new THREE.Mesh(g, m)); const rm = rubber(rv);
     tires.forEach(({ w, tg, h }) => { const t = new THREE.Mesh(tg, rm); t.position.set(w.x, w.r, w.z - w.s * h); gr.add(t); }); return { m, gr }; };
   const rv0 = { uReveal: { value: 99 }, uScan: { value: 0 } }, A = assemble(rv0), material = A.m, group = A.gr;

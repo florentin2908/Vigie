@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.23",
+      "date": "19 nov. 2026",
+      "items": [
+        "Ta voiture scannée ressemble maintenant à une vraie maquette 3D : carrosserie reconstruite tranche par tranche, avec des flancs droits, un épaulement net sous les vitres, un toit plat et un hayon ou un coffre bien dessinés",
+        "Tout reste mesuré sur ta vidéo : la longueur, la largeur, la hauteur de chaque tranche, la ligne des vitres, les roues ; seule la surface est redessinée proprement",
+        "Peinture de studio : ta carrosserie a sa vraie couleur, mesurée en pleine lumière, et brille comme une voiture de salon d'exposition ; les phares, feux, calandre, joncs et jantes viennent toujours de tes images",
+        "Vitres nettes, en verre teinté, avec un joint sombre ; plus de taches sur le capot ni autour des roues",
+        "Les voitures déjà scannées profitent aussi de la peinture de studio ; refais ton scan pour avoir la nouvelle carrosserie"
+      ]
+    },
+    {
       "version": "0.22",
       "date": "19 nov. 2026",
       "items": [
