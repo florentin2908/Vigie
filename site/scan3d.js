@@ -1789,9 +1789,9 @@ async function buildV3(THREE, rec, look) {
     im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('image')); }; im.src = u; });
   const mk = rv => { const m = new THREE.MeshPhysicalMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: tex, metalness: 0, roughness: L.rough,
       specularIntensity: L.spec, clearcoat: L.coat, clearcoatRoughness: L.coatRough, envMapIntensity: L.maq ? L.envMaq : L.env, emissiveIntensity: L.emi, side: THREE.DoubleSide, toneMapped: false });
-    m.userData.reveal = rv; m.userData.glass = hasGlass; m.userData.maq = { on: L.maq ? 1 : 0, paint: new THREE.Color().setRGB(...(rec.paint || [.6, .6, .6]), THREE.SRGBColorSpace), emi: L.emi,
+    m.userData.reveal = rv; m.userData.glass = hasGlass; m.userData.maq = { on: L.maq && rec.paint ? 1 : 0, paint: new THREE.Color().setRGB(...(rec.paint || [.6, .6, .6]), THREE.SRGBColorSpace), emi: L.emi,   // sans couleur mesurée : peinture des images
       wheels: [0, 1, 2, 3].map(n => { const w = (rec.wheels || [])[n]; return w ? new THREE.Vector4(w.x, w.r, w.z, w.s) : new THREE.Vector4(); }), nw: Math.min(4, (rec.wheels || []).length) };
-    m.onBeforeCompile = scanPatch; m.customProgramCacheKey = () => 'vigie-scan-v3' + (hasGlass ? '-vitres' : '') + (L.maq ? '-maq' : ''); return m; };
+    m.onBeforeCompile = scanPatch; m.customProgramCacheKey = () => 'vigie-scan-v3' + (hasGlass ? '-vitres' : '') + (L.maq && rec.paint ? '-maq' : ''); return m; };
   // Pneus : caoutchouc noir (une roue est une roue) ; la jante, elle, vient de tes images (disque de la texture)
   const tires = (rec.wheels || []).map(w => { const r = w.r, tw = clamp(.115 * rec.dims.W, .17, .25), h = tw / 2;
     const prof = [[.74 * r, -h + .012], [.9 * r, -h], [r - .025, -h + .02], [r, -h + .06], [r, h - .06], [r - .025, h - .02], [.9 * r, h], [.74 * r, h - .012]].map(([x, y]) => new THREE.Vector2(x, y));
