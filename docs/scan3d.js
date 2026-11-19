@@ -125,6 +125,36 @@ function cleanMask(raw, W, H) {
   for (let i = 0; i < W * H; i++) if (!out[i]) m[i] = 1;
   return m;
 }
+// Contour du détourage recalé sur les vrais bords de l'image (filtre guidé de He, Sun et Tang, guide en couleur) :
+// DeepLab rend une silhouette un peu molle (sur la vidéo de test, 1 à 3 px de moins le long du toit) ; le filtre la
+// plaque contre les bords de la voiture dans l'image, à r px près au plus.
+function guidedMask(m, img, W, H, r, eps) {
+  const N = W * H, d = img.data, I = [new Float32Array(N), new Float32Array(N), new Float32Array(N)], p = new Float32Array(N);
+  for (let i = 0; i < N; i++) { I[0][i] = d[i * 4] / 255; I[1][i] = d[i * 4 + 1] / 255; I[2][i] = d[i * 4 + 2] / 255; p[i] = m[i]; }
+  const S = new Float64Array((W + 1) * (H + 1));
+  const box = src => { // moyenne sur une fenêtre (2r + 1)², par image intégrale
+    for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += src[y * W + x]; S[(y + 1) * (W + 1) + x + 1] = S[y * (W + 1) + x + 1] + row; } }
+    const out = new Float32Array(N);
+    for (let y = 0; y < H; y++) { const y0 = Math.max(0, y - r), y1 = Math.min(H, y + r + 1);
+      for (let x = 0; x < W; x++) { const x0 = Math.max(0, x - r), x1 = Math.min(W, x + r + 1);
+        out[y * W + x] = (S[y1 * (W + 1) + x1] - S[y0 * (W + 1) + x1] - S[y1 * (W + 1) + x0] + S[y0 * (W + 1) + x0]) / ((x1 - x0) * (y1 - y0)); } }
+    return out; };
+  const mul = (a, b) => { const o = new Float32Array(N); for (let i = 0; i < N; i++) o[i] = a[i] * b[i]; return o; };
+  const mI = I.map(box), mp = box(p), mIp = I.map(c => box(mul(c, p))), vI = [[0, 0], [0, 1], [0, 2], [1, 1], [1, 2], [2, 2]].map(([a, b]) => box(mul(I[a], I[b])));
+  const A0 = new Float32Array(N), A1 = new Float32Array(N), A2 = new Float32Array(N), B = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const m0 = mI[0][i], m1 = mI[1][i], m2 = mI[2][i], pp = mp[i];
+    const s00 = vI[0][i] - m0 * m0 + eps, s01 = vI[1][i] - m0 * m1, s02 = vI[2][i] - m0 * m2, s11 = vI[3][i] - m1 * m1 + eps, s12 = vI[4][i] - m1 * m2, s22 = vI[5][i] - m2 * m2 + eps;
+    const c0 = mIp[0][i] - m0 * pp, c1 = mIp[1][i] - m1 * pp, c2 = mIp[2][i] - m2 * pp;
+    const i00 = s11 * s22 - s12 * s12, i01 = s02 * s12 - s01 * s22, i02 = s01 * s12 - s02 * s11, i11 = s00 * s22 - s02 * s02, i12 = s01 * s02 - s00 * s12, i22 = s00 * s11 - s01 * s01;
+    const det = s00 * i00 + s01 * i01 + s02 * i02;
+    const a0 = (i00 * c0 + i01 * c1 + i02 * c2) / det, a1 = (i01 * c0 + i11 * c1 + i12 * c2) / det, a2 = (i02 * c0 + i12 * c1 + i22 * c2) / det;
+    A0[i] = a0; A1[i] = a1; A2[i] = a2; B[i] = pp - a0 * m0 - a1 * m1 - a2 * m2;
+  }
+  const mA0 = box(A0), mA1 = box(A1), mA2 = box(A2), mB = box(B), out = new Uint8Array(N);
+  for (let i = 0; i < N; i++) out[i] = mA0[i] * I[0][i] + mA1[i] * I[1][i] + mA2[i] * I[2][i] + mB[i] >= .5 ? 1 : 0;
+  return out;
+}
 function dilate(m, W, H, r) {
   let a = m;
   for (let k = 0; k < r; k++) {
@@ -717,6 +747,9 @@ async function sfmCameras(F, vis, P0, fpxG, progress) {
 // Grille alignée sur la voiture : i le long (axe a), j en hauteur, k en largeur (axe b), cubes de CELL mètres.
 // Indice (k * ny + j) * nx + i, comme la grille de départ. Seule la peau de la forme grossière est retestée.
 const CELL = .025;
+// Lissage de la forme fine : passes de flou le long de la voiture (x) et en travers (yz), puis du maillage (Taubin) et des
+// normales d'affichage (reflets du vernis sans bosses)
+const LISSE = { x: 24, yz: 2, taubin: 40, normales: 60 };
 function morph3(occ, n, grow) { // dilatation (grow) ou érosion d'un cube, voisinage 3 × 3 × 3
   let a = occ;
   for (let ax = 0; ax < 3; ax++) { const s = ax === 0 ? 1 : ax === 1 ? n : n * n, b = new Uint8Array(a.length);
@@ -764,6 +797,12 @@ function largestComp3(occ, nx, ny, nz) {
   const out = new Uint8Array(occ.length); for (let i = 0; i < occ.length; i++) if (lab[i] === best) out[i] = 1;
   return out;
 }
+function blur1(f, nx, ny, nz, ax) { // flou [1 2 1] / 4 le long d'un seul axe (0 : longueur, 1 : hauteur, 2 : largeur)
+  const b = new Float32Array(f.length), s = [1, nx, nx * ny][ax], n = [nx, ny, nz][ax];
+  for (let i = 0; i < f.length; i++) { const c = ax === 0 ? i % nx : ax === 1 ? ((i / nx) | 0) % ny : (i / (nx * ny)) | 0;
+    b[i] = (f[i] * 2 + (c > 0 ? f[i - s] : f[i]) + (c < n - 1 ? f[i + s] : f[i])) / 4; }
+  f.set(b); return f;
+}
 function blur3a(f, nx, ny, nz) { // flou [1 2 1] / 4 sur les 3 axes
   const b = new Float32Array(f.length), dims = [nx, ny, nz], strides = [1, nx, nx * ny];
   for (let ax = 0; ax < 3; ax++) { const s = strides[ax], n = dims[ax];
@@ -799,6 +838,31 @@ function symmetrize(f, nx, ny, nz) {
   for (let k = 0; k < nz; k++) { const k2 = bm - k, in2 = k2 >= 0 && k2 < nz;
     for (let j = 0; j < ny; j++) { const o1 = (k * ny + j) * nx, o2 = (k2 * ny + j) * nx; for (let i = 0; i < nx; i++) g[o1 + i] = .5 * (f[o1 + i] + (in2 ? f[o2 + i] : 0)); } }
   return { g, mid: bm / 2 };
+}
+// Flancs tendus (v0.21) : vu d'en haut, la forme sculptée gonfle le milieu des flancs en « tente » (un flanc plat n'est
+// frôlé que par les rares images prises dans son prolongement, et ces rayons ne touchent la carrosserie qu'aux angles).
+// À chaque hauteur, la demi-largeur le long de la voiture est ramenée au niveau atteint près des angles (10e centile du
+// palier), si ce palier couvre au moins 40 % de la longueur ; pas sous jMin (les pneus). g : champ symétrisé, mid : plan
+// de symétrie (en cellules). Sur la vidéo de test : flancs à 1 à 3 cm des vrais au lieu de 5 à 10 cm.
+function tautSides(g, nx, ny, nz, mid, jMin) {
+  const w = new Float32Array(nx), lev = new Float32Array(ny).fill(-1), fill = .12 / CELL;
+  for (let j = jMin; j < ny; j++) {
+    let wmax = -1, i0 = nx, i1 = -1;
+    for (let i = 0; i < nx; i++) { w[i] = -1;
+      for (let k = nz - 1; k > mid; k--) { const v = g[(k * ny + j) * nx + i]; if (v >= .5) { const o = k + 1 < nz ? g[((k + 1) * ny + j) * nx + i] : 0; w[i] = k - mid + (v - .5) / Math.max(1e-3, v - o); break; } }
+      if (w[i] > wmax) wmax = w[i]; if (w[i] >= 0) { if (i < i0) i0 = i; if (i > i1) i1 = i; } }
+    if (i1 - i0 < 40) continue;
+    const pl = []; for (let i = i0; i <= i1; i++) if (w[i] >= wmax - fill) pl.push(w[i]);
+    if (pl.length < .4 * (i1 - i0 + 1)) continue;
+    pl.sort((a, b) => a - b); lev[j] = pl[Math.floor(pl.length * .1)];
+  }
+  // niveaux lissés en hauteur (médiane sur 5 étages), puis la tente est coupée
+  const lv = Float32Array.from(lev); let cut = 0;
+  for (let j = 0; j < ny; j++) { if (lev[j] < 0) continue; const a = []; for (let d = -2; d <= 2; d++) if (j + d >= 0 && j + d < ny && lev[j + d] >= 0) a.push(lev[j + d]); lv[j] = median(a); }
+  for (let j = 0; j < ny; j++) { if (lv[j] < 0) continue;
+    for (let k = 0; k < nz; k++) { const d = Math.abs(k - mid) - lv[j]; if (d <= -.5) continue; const cap = clamp(.5 - d, 0, 1);
+      for (let i = 0; i < nx; i++) { const q = (k * ny + j) * nx + i; if (g[q] > cap) { if (g[q] >= .5 && cap < .5) cut++; g[q] = cap; } } } }
+  return { cut, levels: Array.from(lv).filter(v => v >= 0).length };
 }
 // Couleur dominante d'un ensemble de pixels : la teinte la plus fréquente (ou le gris le plus fréquent pour une voiture
 // blanche, grise ou noire), puis la moyenne des pixels de cette teinte entre le 40e et le 85e centile de luminosité
@@ -928,7 +992,8 @@ async function scanFrames(F, opts, progress) {
       const res = seg.segment(F.smalls[i]), cm = res.categoryMask, cats = cm.getAsUint8Array(), mw = cm.width, mh = cm.height, raw = new Uint8Array(SW * SH);
       for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) { const c = cats[Math.min(mh - 1, (y * mh / SH) | 0) * mw + Math.min(mw - 1, (x * mw / SW) | 0)]; raw[y * SW + x] = keep.includes(c) ? 1 : 0; }
       try { res.close(); } catch (e) {}
-      masks.push(cleanMask(raw, SW, SH));
+      { const cm0 = cleanMask(raw, SW, SH), gf = opts.affine === false ? null : opts.affine || [8, .01];   // v0.21 : contour recalé sur l'image
+        masks.push(gf ? cleanMask(guidedMask(cm0, F.smalls[i], SW, SH, gf[0], gf[1]), SW, SH) : cm0); }
       progress('mask', (i + 1) / NF); if (i % 6 === 5) await tick();
       // Pas de voiture sur le premier tiers du tour : inutile de continuer
       if (i === Math.floor(NF / 3) - 1) { const seen = masks.filter(m => maskStats(m, SW, SH).frac > .02).length; if (seen < Math.max(2, NF / 12)) { const e = new Error('voiture'); e.quality = { carFrames: seen, frames: i + 1 }; throw e; } }
@@ -1017,7 +1082,10 @@ async function scanFrames(F, opts, progress) {
   const ff = new Float32Array(fo.length); let fv = 0; for (let i = 0; i < ff.length; i++) { ff[i] = fo[i]; fv += fo[i]; }
   if (fv < 5000) { const e = new Error('forme'); e.quality = q; throw e; }
   blur3a(ff, nx, ny, nz); blur3a(ff, nx, ny, nz); blur3a(ff, nx, ny, nz);
+  // Lissage (v0.21) : surtout dans la longueur (les bosses de la sculpture), un peu en travers (les arêtes restent nettes)
+  const LS = Object.assign({}, LISSE, opts.lissage); for (let k = 0; k < LS.x; k++) blur1(ff, nx, ny, nz, 0); for (let k = 0; k < LS.yz; k++) { blur1(ff, nx, ny, nz, 1); blur1(ff, nx, ny, nz, 2); }
   const sym = symmetrize(ff, nx, ny, nz), f8 = new Uint8Array(ff.length);
+  if (opts.tendu !== false) q.fine.tendu = tautSides(sym.g, nx, ny, nz, sym.mid, Math.round(.25 / CELL));
   let i0 = nx, i1 = -1, j1 = -1, k0 = nz, k1 = -1;
   for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const v = sym.g[(k * ny + j) * nx + i]; f8[(k * ny + j) * nx + i] = Math.round(clamp(v, 0, 1) * 255);
     if (v >= .5) { if (i < i0) i0 = i; if (i > i1) i1 = i; if (j > j1) j1 = j; if (k < k0) k0 = k; if (k > k1) k1 = k; } }
@@ -1034,8 +1102,14 @@ async function scanFrames(F, opts, progress) {
       const zo = xa => { const i = clamp(Math.round((xa - disp.a0) / CELL - .5), 0, nx - 1), j = Math.min(ny - 1, Math.round(rP / CELL - .5)); let km = -1;
         for (let k = nz - 1; k >= 0; k--) if (disp.field[(k * ny + j) * nx + i] >= 128) { km = k; break; }
         return km < 0 ? dims.W / 2 - .06 : (disp.b0 + (km + .5) * CELL) - disp.bc - .025; };
-      wd = { wheels: [{ xa: fa, r: rP, zo: zo(fa) }, { xa: ra, r: rP, zo: zo(ra) }], sill: wd ? wd.sill : 0, source: ws ? 'vues de côté (' + ws.nF + ' + ' + ws.nR + ' contacts)' : 'forme' };
+      wd = { wheels: [{ xa: fa, r: rP, zo: zo(fa) }, { xa: ra, r: rP, zo: zo(ra) }], sill: ws && ws.sill != null ? clamp(ws.sill, 0, .45) : wd ? wd.sill : 0, source: ws ? 'vues de côté (' + ws.nF + ' + ' + ws.nR + ' contacts)' : 'forme' };
     } else wd = null; }
+  // Dessous (v0.21) : jamais vu par le téléphone (plus haut que lui), la forme sculptée y descend jusqu'au sol. Elle est
+  // coupée à plat à la hauteur du bas de caisse, entre les roues comme aux bouts (les pneus sont ajoutés ensuite).
+  if (wd && opts.sous !== false && wd.sill >= .08) { const F8 = disp.field; let cutS = 0;
+    for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) { const t = clamp(((j + .5) * CELL - wd.sill) / CELL + .5, 0, 1); if (t >= 1) continue;
+      for (let i = 0; i < nx; i++) { const q = (k * ny + j) * nx + i; const v = Math.round(F8[q] * t); if (F8[q] >= 128 && v < 128) cutS++; F8[q] = v; } }
+    q.fine.sousCut = cutS; }
   if (wd) { carveWells(disp, wd.wheels); q.roues = { rayonsCm: wd.wheels.map(w => Math.round(w.r * 100)), empattementCm: Math.round((wd.wheels[0].xa - wd.wheels[1].xa) * 100), basDeCaisseCm: Math.round(wd.sill * 100), source: wd.source }; }
   else q.roues = 'non trouvées';
   Object.assign(q.fine, { voxels: fv, grid: [nx, ny, nz], symPlaneCm: Math.round((disp.bc - (fine.b0 + nz * CELL / 2)) * 100) });
@@ -1054,7 +1128,7 @@ async function scanFrames(F, opts, progress) {
   // v0.19 : maillage calculé une fois, texture « cuite » sur la carte graphique (toutes les images, visibilité, exposition)
   if (!opts.noBake) try {
     const THREE = await import('three'), MC = await import('three/addons/objects/MarchingCubes.js');
-    const m0 = meshFromField(disp, align, MC), m = wd ? addRims(m0, wd.wheels, disp, align) : m0, mm = uvCharts(m, 2048);
+    const m0 = meshFromField(disp, align, MC, LS.taubin, LS.normales), m = wd ? addRims(m0, wd.wheels, disp, align) : m0, mm = uvCharts(m, 2048);
     if (m.wheels) { const xs = m.wheels.map(w => w.x); dims.wf = Math.max(...xs); dims.wr = Math.min(...xs); }
     // Pas de correction d'exposition : avec 72 images voisines, les écarts se fondent d'eux-mêmes (une correction essayée
     // confondait les reflets avec l'exposition sur la vidéo de test)
@@ -1191,10 +1265,10 @@ function vertexNormals(P, I) { // normales des sommets, pondérées par l'aire d
 }
 // Maillage de la forme : marching cubes, lissage, sens de la voiture (avant vers +x), triangles tournés vers l'extérieur.
 // pos/nrm : repère d'affichage (centré, axe long sur x) ; orig/onrm : repère des caméras du scan.
-function meshFromField(D, align, MC) {
+function meshFromField(D, align, MC, taubin = 16, nSmooth = 24) {
   const { nx, ny, nz, cell, a0, b0, ac, bc } = D;
   const { P, I } = marching(D.field, nx, ny, nz, 127.5, MC.edgeTable, MC.triTable);
-  smoothMesh(P, I, 16);
+  smoothMesh(P, I, taubin);
   const nV = P.length / 3, { alpha, cx, cz } = align, ca = Math.cos(alpha), sa = Math.sin(alpha);
   // Sens de la voiture : le toit (le haut de l'habitacle) est presque toujours plus près de l'arrière que de l'avant
   // (capot devant, coffre ou hayon derrière). L'avant est placé du côté des x positifs, comme les dessins de Vigie.
@@ -1215,7 +1289,7 @@ function meshFromField(D, align, MC) {
   smoothNormals(nr, I, 3);
   const on = new Float32Array(nV * 3);
   for (let v = 0; v < nV; v++) { const na = nr[v * 3] * flip, nb = nr[v * 3 + 2] * flip; on[v * 3] = na * ca - nb * sa; on[v * 3 + 1] = nr[v * 3 + 1]; on[v * 3 + 2] = na * sa + nb * ca; }
-  const rn = Float32Array.from(nr); smoothNormals(rn, I, 24);   // normales d'affichage : reflets du vernis sans bosses
+  const rn = Float32Array.from(nr); smoothNormals(rn, I, nSmooth);   // normales d'affichage : reflets du vernis sans bosses
   return { pos, orig, nrm: rn, onrm: on, idx: I, flip, roofA };
 }
 
@@ -1252,7 +1326,7 @@ function detectWheels(D, ext) {
 // si la voiture dépasse du cadre). Chaque point le plus bas est ramené sur le sol (rayon de la caméra jusqu'à y = 0),
 // donc à sa vraie place le long de la voiture ; médiane sur toutes les vues de côté.
 function wheelsFromSides(vis, cams, masks, SW, SH, fpx, align, ac, dims) {
-  const ca = Math.cos(align.alpha), sa = Math.sin(align.alpha), F = [], R = [];
+  const ca = Math.cos(align.alpha), sa = Math.sin(align.alpha), F = [], R = [], SL = [];
   for (let j = 0; j < vis.length; j++) { const c = cams[j];
     const dx = align.cx - c.C[0], dz = align.cz - c.C[2], da = dx * ca + dz * sa, db = -dx * sa + dz * ca, dd = Math.hypot(da, db);
     if (Math.abs(db) / dd < .77) continue;                                          // vues de côté (±40°)
@@ -1260,7 +1334,7 @@ function wheelsFromSides(vis, cams, masks, SW, SH, fpx, align, ac, dims) {
     for (let x = 0; x < SW; x++) for (let y = SH - 1; y >= 0; y--) if (m[y * SW + x]) { yb[x] = y; break; }
     const ys = Float32Array.from(yb);
     for (let x = 2; x < SW - 2; x++) if (yb[x - 2] >= 0 && yb[x + 2] >= 0) ys[x] = median([yb[x - 2], yb[x - 1], yb[x], yb[x + 1], yb[x + 2]]);
-    const rp = Math.max(4, Math.round(fpx * .32 / Math.max(1.5, dd - dims.W / 4))), rise = Math.max(2, .25 * rp);
+    const rp = Math.max(4, Math.round(fpx * .32 / Math.max(1.5, dd - dims.W / 4))), rise = Math.max(2, .25 * rp), cps = [];
     for (let x = 0; x < SW; x++) { const y0 = ys[x]; if (y0 < 0 || y0 >= SH - 2) continue;        // bas du pneu hors cadre
       let top = true; for (let k = Math.max(0, x - rp); k <= Math.min(SW - 1, x + rp) && top; k++) if (ys[k] > y0) top = false;
       if (!top) continue;
@@ -1272,10 +1346,17 @@ function wheelsFromSides(vis, cams, masks, SW, SH, fpx, align, ac, dims) {
       const dir = [0, 1, 2].map(k => c.f[k] + rx * c.r[k] + uy * c.u[k]);
       if (dir[1] < -1e-3) { const t = -c.C[1] / dir[1], gx = c.C[0] + t * dir[0] - align.cx, gz = c.C[2] + t * dir[2] - align.cz;
         const a = gx * ca + gz * sa, b = -gx * sa + gz * ca;
-        if (Math.abs(b) < dims.W / 2 + .3 && Math.abs(a - ac) < dims.L / 2) (a > ac ? F : R).push(a); }
-      x += rp; } }
+        if (Math.abs(b) < dims.W / 2 + .3 && Math.abs(a - ac) < dims.L / 2) { (a > ac ? F : R).push(a); cps.push(px); } }
+      x += rp; }
+    // Bas de caisse (v0.21) : entre les deux pneus, le bas de la silhouette est le bord inférieur du flanc proche ; son rayon
+    // est arrêté sur le plan de ce flanc (demi-largeur), ce qui donne sa hauteur
+    if (cps.length >= 2) { const p1 = Math.min(...cps), p2 = Math.max(...cps), bs = db > 0 ? -dims.W / 2 : dims.W / 2;
+      if (p2 - p1 > 4 * rp) for (let x = Math.round(p1 + .3 * (p2 - p1)); x <= p1 + .7 * (p2 - p1); x += 2) { if (ys[x] < 0) continue;
+        const rx = (x + .5 - SW / 2) / fpx, uy = (SH / 2 - (ys[x] + 1)) / fpx, dir = [0, 1, 2].map(k => c.f[k] + rx * c.r[k] + uy * c.u[k]);
+        const bC = -(c.C[0] - align.cx) * sa + (c.C[2] - align.cz) * ca, bD = -dir[0] * sa + dir[2] * ca; if (Math.abs(bD) < 1e-6) continue;
+        const t = (bs - bC) / bD; if (t > 0) SL.push(c.C[1] + t * dir[1]); } } }
   if (F.length < 3 || R.length < 3) return null;
-  return { front: median(F), rear: median(R), nF: F.length, nR: R.length };
+  return { front: median(F), rear: median(R), nF: F.length, nR: R.length, sill: SL.length >= 20 ? median(SL) : null, nSill: SL.length };
 }
 // Passages de roue : on creuse la forme autour de chaque roue (rayon + 3,5 cm), du flanc vers l'intérieur (27 cm)
 function carveWells(D, wheels) {

@@ -140,7 +140,7 @@ async def main():
                 'angle_erreur_moy_sens_inverse_deg': round(sum(errs2) / len(errs2), 1),
                 'dims_scan': {k: round(v, 2) for k, v in D.items()}, 'dims_vraies': {k: round(v, 2) for k, v in T.items()},
                 'L/H_scan': round(ratio(D['L'], D['H']), 2), 'L/H_vrai': round(ratio(T['L'], T['H']), 2),
-                'W/H_scan': round(ratio(D['W'], D['H']), 2), 'W/H_vrai': round(ratio(T['W'], T['H']), 2)})
+                'W/H_scan': round(ratio(D['W'], D['H']), 2), 'W/H_vrai': round(ratio(T.get('Wcaisse', T['W']), T['H']), 2)})   # largeur de caisse, sans rétroviseurs
     from PIL import Image
     import io
     ims = [Image.open(io.BytesIO(base64.b64decode(v.split(',')[1]))) for v in res['views']]

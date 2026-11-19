@@ -8,7 +8,7 @@ d'une voiture Vigie rouge, sur un parking, à hauteur des phares, en suivant un 
 2,8 m de la carrosserie, à vitesse de marche constante (donc à vitesse d'angle variable), avec de petits
 tremblements de visée. Décor : sol texturé, immeubles, ciel, une autre voiture garée plus loin.
 Sortie : tour-synthetique.mp4 (30 s, H.264) et tour-synthetique.json (angle vrai de chaque image,
-distance, dimensions vraies de la voiture, champ de la caméra).
+distance, dimensions vraies de la voiture (largeur avec et sans rétroviseurs), champ de la caméra).
 """
 import argparse, asyncio, base64, functools, http.server, json, os, re, socketserver, subprocess, sys, tempfile, threading
 
@@ -71,7 +71,8 @@ function pathAt(u){ // u ∈ [0,1) le long du chemin, sens trigonométrique vu d
   for(const [len,k,p0,q] of segs){if(d<=len){if(k==='s')return [p0[0]+q[0]*d,p0[1]+q[1]*d];const a=q+d/off;return [p0[0]+Math.cos(a)*off,p0[1]+Math.sin(a)*off];}d-=len;}
   return pathAt(0);
 }
-window.__frames=[];window.__truth={n:N,hfov:HFOV,w:W,h:H,dims:{L:size.x,W:size.z,H:size.y},center:[ctr.x,ctr.y,ctr.z],frames:[]};
+const caisse=new THREE.Box3().setFromObject(car.group.children[0]).getSize(new THREE.Vector3()); // largeur de caisse, sans les rétroviseurs
+window.__frames=[];window.__truth={n:N,hfov:HFOV,w:W,h:H,dims:{L:size.x,W:size.z,H:size.y,Wcaisse:caisse.z},center:[ctr.x,ctr.y,ctr.z],frames:[]};
 const tgt=new THREE.Vector3(ctr.x,.65,ctr.z);
 window.__render=function(i){
   const u=(i/N+%(depart)f)%%1,[x,z]=pathAt(u),y=.85+Math.sin(i*.9)*.02;

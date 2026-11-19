@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.21",
+      "date": "19 nov. 2026",
+      "items": [
+        "Plus de bulles sur ta voiture scannée : la forme est lissée surtout dans la longueur, et les reflets du vernis glissent sans bosses",
+        "Carrosserie tendue : le milieu des flancs ne gonfle plus (il ressortait de 5 à 10 cm). Sur la vidéo de test, les flancs sont maintenant à 1 à 3 cm des vrais et la largeur de caisse est juste",
+        "Contour de ta voiture plus précis dans chaque image : Vigie le cale sur les vrais bords de l'image (30 % d'erreurs en moins sur la vidéo de test)",
+        "Le dessous n'est plus collé au sol : Vigie mesure la hauteur du bas de caisse sur les vues de côté, et on voit le jour sous la voiture entre les roues",
+        "Refais ton scan pour en profiter : une voiture scannée avant garde sa forme d'origine"
+      ]
+    },
+    {
       "version": "0.20",
       "date": "19 nov. 2026",
       "items": [

@@ -425,7 +425,7 @@ async def scan3d(pg):
         if st['err']: errors.append('contrôle : scan 3D refusé : ' + st['err'])
         if not st['scan']: errors.append('contrôle : pas de voiture en 3D après la vidéo de test : ' + (st['scanNote'] or '?')); return
         dm = st['scanDims']; q = st['scanQ'] or {}
-        lh, wh, tlh, twh = dm['L'] / dm['H'], dm['W'] / dm['H'], truth['L'] / truth['H'], truth['W'] / truth['H']
+        lh, wh, tlh, twh = dm['L'] / dm['H'], dm['W'] / dm['H'], truth['L'] / truth['H'], truth.get('Wcaisse', truth['W']) / truth['H']   # largeur de caisse (v0.21 : flancs tendus, sans rétroviseurs)
         scan_3d['proportions'] = {'longueur_sur_hauteur': [round(lh, 2), round(tlh, 2)], 'largeur_sur_hauteur': [round(wh, 2), round(twh, 2)]}
         if abs(lh / tlh - 1) > .15 or abs(wh / twh - 1) > .2:
             errors.append(f"contrôle : la voiture scannée n'a pas les bonnes proportions (L/H {lh:.2f} au lieu de {tlh:.2f}, l/H {wh:.2f} au lieu de {twh:.2f})")
@@ -468,10 +468,12 @@ async def scan3d(pg):
         if st2['err']: errors.append('contrôle : scan par photos refusé : ' + st2['err'])
         if not st2['scan']: errors.append('contrôle : pas de voiture en 3D après 40 photos de la vidéo de test : ' + (st2['scanNote'] or '?'))
         else:
-            dm = st2['scanDims']; lh, wh = dm['L'] / dm['H'], dm['W'] / dm['H']
-            scan_3d['photos']['proportions'] = {'longueur_sur_hauteur': [round(lh, 2), round(tlh, 2)], 'largeur_sur_hauteur': [round(wh, 2), round(twh, 2)]}
-            if abs(lh / tlh - 1) > .15 or abs(wh / twh - 1) > .2:
-                errors.append(f"contrôle : la voiture scannée avec des photos n'a pas les bonnes proportions (L/H {lh:.2f} au lieu de {tlh:.2f}, l/H {wh:.2f} au lieu de {twh:.2f})")
+            # Avec 40 photos, le calage est souvent refusé et la forme reste plus large (limite notée dans roadmap.md) : comparée,
+            # comme en v0.20, à la largeur hors tout (rétroviseurs compris) ; la largeur de caisse est notée dans le rapport
+            dm = st2['scanDims']; lh, wh, twp = dm['L'] / dm['H'], dm['W'] / dm['H'], truth['W'] / truth['H']
+            scan_3d['photos']['proportions'] = {'longueur_sur_hauteur': [round(lh, 2), round(tlh, 2)], 'largeur_sur_hauteur': [round(wh, 2), round(twp, 2)], 'largeur_de_caisse_sur_hauteur_vraie': round(twh, 2)}
+            if abs(lh / tlh - 1) > .15 or abs(wh / twp - 1) > .2:
+                errors.append(f"contrôle : la voiture scannée avec des photos n'a pas les bonnes proportions (L/H {lh:.2f} au lieu de {tlh:.2f}, l/H {wh:.2f} au lieu de {twp:.2f})")
             try: await pg.wait_for_function(SCAN_STATE + " === 'affichée'", timeout=40000)
             except Exception: errors.append('contrôle : la voiture scannée avec des photos ne s\'affiche pas')
     except Exception as e:
