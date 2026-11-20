@@ -13,7 +13,7 @@ puis compare la voiture scannée à la vraie voiture filmée :
 - flou : netteté de l'image (gradient moyen à l'intérieur de la voiture) du scan peint rapportée à celle de la vraie
   voiture, vues « côté » et « proche » (1 = aussi net que la vraie voiture) ;
 - durée du scan, taille du maillage et de la texture, sommets de la carrosserie lisse.
-Écrit mesure.json, planche.png (vraie voiture | scan peint | scan en argile, 5 vues) et forme.png (écarts en couleur :
+Écrit mesure.json, qualite.json (bilan complet du scan), planche.png (vraie voiture | scan peint | scan en argile, 5 vues) et forme.png (écarts en couleur :
 rouge = scan trop grand, bleu = trop petit, vert = manque au scan, orange = en trop).
 Avec --modele : la vraie voiture est ce modèle .glb (celui donné à outils/video-de-test.py --modele) ; il n'est jamais
 copié dans le dépôt.
@@ -307,6 +307,7 @@ def main():
                          texelsParMetre=bake.get('texelsParMetre'), vitresPct=bake.get('vitresPct'), lisse=(q.get('fine') or {}).get('lisse'), roues=q.get('roues')),
                erreurs=errs[:10], dureeS=round(time.time() - t0))
     json.dump(rep, open(os.path.join(OUT, 'mesure.json'), 'w'), indent=1, ensure_ascii=False)
+    json.dump(q, open(os.path.join(OUT, 'qualite.json'), 'w'), indent=1, ensure_ascii=False)   # bilan complet du scan (q), pour chercher un défaut
     # planche : vraie voiture | scan peint | scan en argile
     names = ['accueil', 'arriere', 'cote', 'dessus', 'proche']; W, H = img(shots[0]['img']).size
     sheet = Image.new('RGB', (W * 3, H * len(names) + 28), (20, 18, 44)); g = ImageDraw.Draw(sheet)

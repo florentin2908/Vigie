@@ -1426,7 +1426,9 @@ async function scanFrames(F, opts, progress) {
     let m0 = null;   // v0.24 : carrosserie lisse construite coupe par coupe (sinon, ou si elle échoue : forme sculptée en cubes)
     if (coupes && opts.lisse !== false) try { m0 = maquetteMesh(disp, coupes, wd ? wd.wheels : [], align); if (m0) q.fine.lisse = { coupes: m0.coupes, arches: m0.arches }; } catch (e) { q.fine.lisse = 'repli : ' + (e && e.message || e); m0 = null; }
     if (!m0) m0 = meshFromField(disp, align, MC, beltLine ? MQ.taubin : LS.taubin, beltLine ? MQ.normales : LS.normales);
-    const m = wd ? addRims(m0, wd.wheels, disp, align) : m0, mm = uvCharts(m, 2048);
+    const m1 = wd ? addRims(m0, wd.wheels, disp, align) : m0, mirs = coupes && m0.parts && opts.retros !== false ? mirrorsFrom(disp, coupes) : null;
+    const m = mirs ? addMirrors(m1, mirs, disp, align) : m1, mm = uvCharts(m, 2048);
+    q.retros = mirs ? { piedPareBriseCm: Math.round(mirs[0].dF * 100), miPareBriseCm: Math.round(mirs[0].dM * 100), dépasseCm: Math.round((mirs[0].zOut - mirs[0].zIn - .06) * 100), hauteurCm: Math.round(mirs[0].y * 100) } : 'non placés';
     if (m.wheels) { const xs = m.wheels.map(w => w.x); dims.wf = Math.max(...xs); dims.wr = Math.min(...xs); }
     // Pas de correction d'exposition : avec 72 images voisines, les écarts se fondent d'eux-mêmes (une correction essayée
     // confondait les reflets avec l'exposition sur la vidéo de test)
@@ -1672,6 +1674,62 @@ function carveWells(D, wheels) {
         for (let i = ia; i <= ib; i++) { const d = Math.hypot(a0 + (i + .5) * cell - w.xa, y - w.r) - R, sOut = clamp(d / cell + .5, 0, 1), q = (k * ny + j) * nx + i;
           F[q] = Math.round(F[q] * (1 - t * (1 - sOut))); } } } }
 }
+// Place des rétroviseurs : la forme sculptée ne les garde pas (trop fins, retirés par la tolérance de la sculpture) et
+// leur image tombait sur la portière et le montant. Le pied du pare-brise est repéré sur le profil du haut (voir plus
+// bas) ; le rétroviseur y est posé (pied du montant), à hauteur
+// de ceinture, et dépasse du flanc de 10 cm (taille courante, un peu plus grand sur une voiture haute).
+function mirrorsFrom(D, C) {
+  const { cell, a0 } = D, { flip } = frontOf(D), av = i => a0 + (i + .5) * cell, belt = a => C.ka * a + C.kb;
+  const iF = flip > 0 ? C.i1 : C.i0, st = -flip, L = (C.i1 - C.i0 + 1) * cell, T = C.T, ok = i => i >= C.i0 && i <= C.i1 && !isNaN(T[i]);
+  let roof = 0; for (let i = C.i0; i <= C.i1; i++) if (ok(i) && T[i] > roof) roof = T[i];
+  // milieu du pare-brise : 1re tranche (depuis l'avant) à mi-hauteur entre la ceinture et le toit ; puis on redescend la
+  // pente vers l'avant tant qu'elle reste celle d'un pare-brise (plus de 25 cm de montée par mètre) : là est son pied
+  let mid = -1; for (let n = 0; n * cell < .7 * L; n++) { const i = iF + st * n; if (ok(i) && T[i] - belt(av(i)) > .5 * (roof - belt(av(i)))) { mid = i; break; } }
+  if (mid < 0) return null;
+  const sl = i => ok(i + 2) && ok(i - 2) ? Math.abs(T[i + 2] - T[i - 2]) / (4 * cell) : 0;
+  let ws = mid; while (ok(ws - st) && sl(ws - st) > .25 && Math.abs(ws - iF) > 2) ws -= st;
+  if (ws < 0) return null;
+  const dF = Math.abs(av(ws) - av(iF)); if (dF < .3 || dF > .45 * L) return null;
+  const k = clamp(Math.max(...Array.from(C.T).filter(v => !isNaN(v))) / 1.5, .85, 1.25), a = av(ws), i = clamp(Math.round((a - a0) / cell - .5), C.i0, C.i1);
+  const w = C.WB[i], bl = belt(a); if (isNaN(w)) return null;
+  const h = .13 * k, y = Math.min(bl + .08 * k, C.T[i] - h / 2 - .02);
+  return [1, -1].map(side => ({ side, a, y, h, len: .17 * k, zIn: w - .06, zOut: w + .1 * k, dF, dM: Math.abs(av(mid) - av(iF)) }));
+}
+// Rétroviseurs (v0.26) : dessin simple et original (coque arrondie qui s'affine vers la portière), posé à la place
+// trouvée par mirrorsFrom ; peint ensuite par la cuisson avec les images.
+// Chaque face a sa propre carte de texture (14 + 6 × n° + face), sinon elle partagerait l'image de la portière.
+function addMirrors(m, mirrors, D, align) {
+  const { ac, bc } = D, flip = m.flip, ca = Math.cos(align.alpha), sa = Math.sin(align.alpha), NLA = 10, NLO = 24, E = .45;
+  const sp = (v, e) => Math.sign(v) * Math.pow(Math.abs(v), e);
+  const P = [], O = [], N = [], ON = [], I = [], fixed = []; let base = m.pos.length / 3; const nT0 = m.idx.length / 3, info = [];
+  mirrors.forEach((mr, mi) => {
+    const hz = (mr.zOut - mr.zIn) / 2, zc = (mr.zIn + mr.zOut) / 2, hx = mr.len / 2, hy = mr.h / 2, loc = [], c0 = base;
+    for (let la = 0; la <= NLA; la++) { const ph = -Math.PI / 2 + la * Math.PI / NLA;
+      for (let lo = 0; lo < NLO; lo++) { const th = lo * 2 * Math.PI / NLO;
+        const ux = sp(Math.cos(ph), E) * sp(Math.cos(th), E), uy = sp(Math.sin(ph), E), uz = sp(Math.cos(ph), E) * sp(Math.sin(th), E);
+        const k = .5 + .5 * (uz + 1) / 2;   // plus fin côté portière (pied), plein côté extérieur (coque)
+        loc.push([mr.a + ux * hx * k, mr.y + uy * hy * k, mr.side * (zc + uz * hz)]); } }
+    const nv = loc.length, acc = new Float64Array(nv * 3), at = (la, lo) => la * NLO + ((lo + NLO) % NLO), tris = [];
+    for (let la = 0; la < NLA; la++) for (let lo = 0; lo < NLO; lo++) { const a = at(la, lo), b = at(la, lo + 1), c = at(la + 1, lo + 1), d = at(la + 1, lo);
+      if (la > 0) tris.push([a, b, c]); if (la < NLA - 1) tris.push([a, c, d]); }
+    const ctr = [mr.a, mr.y, mr.side * zc];
+    for (const t of tris) { const [A, B, C] = t.map(i => loc[i]); const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const g = [(A[0] + B[0] + C[0]) / 3 - ctr[0], (A[1] + B[1] + C[1]) / 3 - ctr[1], (A[2] + B[2] + C[2]) / 3 - ctr[2]];
+      if (nx * g[0] + ny * g[1] + nz * g[2] < 0) { const s = t[1]; t[1] = t[2]; t[2] = s; nx = -nx; ny = -ny; nz = -nz; }
+      for (const i of t) { acc[i * 3] += nx; acc[i * 3 + 1] += ny; acc[i * 3 + 2] += nz; }
+      const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz), f = az >= ax && az >= ay ? (nz > 0 ? 0 : 1) : ax >= ay ? (nx > 0 ? 2 : 3) : (ny > 0 ? 4 : 5);
+      I.push(c0 + t[0], c0 + t[1], c0 + t[2]); fixed.push(14 + mi * 6 + f); }
+    for (let i = 0; i < nv; i++) { const [a, y, z] = loc[i], b = bc + z, l = Math.hypot(acc[i * 3], acc[i * 3 + 1], acc[i * 3 + 2]) || 1, na = acc[i * 3] / l, ny = acc[i * 3 + 1] / l, nz = acc[i * 3 + 2] / l;
+      P.push((a - ac) * flip, y, z * flip); O.push(align.cx + a * ca - b * sa, y, align.cz + a * sa + b * ca);
+      N.push(na * flip, ny, nz * flip); ON.push(na * ca - nz * sa, ny, na * sa + nz * ca); }
+    base += nv; info.push(mr);
+  });
+  const cat = (A, B) => { const r = new Float32Array(A.length + B.length); r.set(A); r.set(B, A.length); return r; };
+  const idx = new Uint32Array(m.idx.length + I.length); idx.set(m.idx); idx.set(I, m.idx.length);
+  const fx = new Uint8Array(nT0 + fixed.length).fill(255); if (m.fixed) fx.set(m.fixed); fx.set(fixed, nT0);
+  return Object.assign({}, m, { pos: cat(m.pos, P), orig: cat(m.orig, O), nrm: cat(m.nrm, N), onrm: cat(m.onrm, ON), idx, fixed: fx });
+}
 // Disques de jante (en retrait de 3 cm dans le pneu) ajoutés au maillage : la texture y pose les vraies jantes, à la bonne profondeur
 function addRims(m, wheels, D, align) {
   const { ac, bc } = D, flip = m.flip, ca = Math.cos(align.alpha), sa = Math.sin(align.alpha), RINGS = 6, SEG = 48;
@@ -1720,9 +1778,9 @@ function uvCharts(m, size) {
         if (best !== chart[t]) { const [ax, sg] = axisOf[best]; if (fn[t * 3 + ax] * sg > .35) next[t] = best; } }
       chart.set(next); }
   }
-  const NC = 14, RC = m.rimCenters || {};
-  const proj = (c, x, y, z) => c >= 6 ? [(x - RC[c][0]) * RC[c][2], y - RC[c][1]] : c === 0 ? [x, y] : c === 1 ? [-x, y] : c === 2 ? [-z, y] : c === 3 ? [z, y] : c === 4 ? [x, -z] : [x, z];
-  const SC = [1, 1, 1, 1, 1, .3, 1, 1, 1, 1, 1, 1, 1, 1], key = new Int32Array(nV * NC).fill(-1), src = [], uvm = [], ch = [];
+  const NC = 26, RC = m.rimCenters || {};
+  const proj = (c, x, y, z) => c >= 14 ? proj((c - 14) % 6, x, y, z) : c >= 6 ? [(x - RC[c][0]) * RC[c][2], y - RC[c][1]] : c === 0 ? [x, y] : c === 1 ? [-x, y] : c === 2 ? [-z, y] : c === 3 ? [z, y] : c === 4 ? [x, -z] : [x, z];
+  const SC = [1, 1, 1, 1, 1, .3, 1, 1, 1, 1, 1, 1, 1, 1, ...new Array(12).fill(1)], key = new Int32Array(nV * NC).fill(-1), src = [], uvm = [], ch = [];
   const nIdx = new Uint32Array(idx.length);
   for (let t = 0; t < nT; t++) { const c = chart[t];
     for (let k = 0; k < 3; k++) { const v = idx[t * 3 + k], kk = v * NC + c;
@@ -1732,7 +1790,7 @@ function uvCharts(m, size) {
   for (let c = 0; c < NC; c++) B.push([1e9, 1e9, -1e9, -1e9]);
   for (let i = 0; i < n2; i++) { const b = B[ch[i]], u = uvm[i * 2], w = uvm[i * 2 + 1]; if (u < b[0]) b[0] = u; if (w < b[1]) b[1] = w; if (u > b[2]) b[2] = u; if (w > b[3]) b[3] = w; }
   // Rangement en étagères ; on cherche la plus grande échelle (texels par mètre) qui tient dans la texture
-  const pad = 8, order = [0, 1, 4, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13].filter(c => B[c][2] > B[c][0]);
+  const pad = 8, order = [0, 1, 4, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, ...Array.from({ length: 12 }, (_, k) => 14 + k)].filter(c => B[c][2] > B[c][0]);
   const pack = s => { let x = 0, y = 0, rowH = 0; const off = [];
     for (const c of [...order].sort((p, q) => (B[q][3] - B[q][1]) * SC[q] - (B[p][3] - B[p][1]) * SC[p])) {
       const w = Math.ceil((B[c][2] - B[c][0]) * s * SC[c]) + 2 * pad, h = Math.ceil((B[c][3] - B[c][1]) * s * SC[c]) + 2 * pad;
@@ -1748,13 +1806,13 @@ function uvCharts(m, size) {
     uv[i * 2] = ((uvm[i * 2] - B[c][0]) * k + o[0] + pad) / size; uv[i * 2 + 1] = ((uvm[i * 2 + 1] - B[c][1]) * k + o[1] + pad) / size; }
   const pick = (a, d) => { const r = new Float32Array(n2 * d); for (let i = 0; i < n2; i++) for (let j = 0; j < d; j++) r[i * d + j] = a[src[i] * d + j]; return r; };
   return { pos: pick(m.pos, 3), nrm: pick(m.nrm, 3), orig: pick(m.orig, 3), onrm: pick(m.onrm, 3), uv, idx: nIdx, texPerM: s,
-    src: Uint32Array.from(src), rim: Uint8Array.from(ch, c => c >= 6 ? 1 : 0), idx0: idx, nV0: nV };
+    src: Uint32Array.from(src), rim: Uint8Array.from(ch, c => c >= 6 && c < 14 ? 1 : 0), mir: Uint8Array.from(ch, c => c >= 14 ? 1 : 0), idx0: idx, nV0: nV };
 }
 // Vitres repérées par sommet : rapport « vue la plus sombre / moyenne » lu dans la texture (3 × 3 texels), moyenné sur
 // les copies d'un même sommet, lissé 6 fois sur les voisins, puis seuil doux. Jantes et moitié basse exclues.
 function glassMask(mm, rp, size, H) {
   const n = mm.pos.length / 3, n0 = mm.nV0, src = mm.src, sum = new Float32Array(n0), cnt = new Float32Array(n0);
-  for (let i = 0; i < n; i++) { if (mm.rim && mm.rim[i]) continue;
+  for (let i = 0; i < n; i++) { if (mm.rim && mm.rim[i] || mm.mir && mm.mir[i]) continue;
     const x0 = Math.floor(mm.uv[i * 2] * size), y0 = Math.floor(mm.uv[i * 2 + 1] * size); let r = 0, d = 0, k = 0;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const x = x0 + dx, y = y0 + dy; if (x < 0 || y < 0 || x >= size || y >= size) continue;
       const o = (y * size + x) * 4; if (rp[o + 3] < 128 || rp[o + 1] < 50) continue; r += rp[o] / 255; d += (rp[o + 2] / 255) ** 2 / 4; k++; }
@@ -1768,7 +1826,7 @@ function glassMask(mm, rp, size, H) {
     for (let t = 0; t < I.length; t += 3) { const s3 = f[I[t]] + f[I[t + 1]] + f[I[t + 2]]; for (let k = 0; k < 3; k++) { a[I[t + k]] += s3; c[I[t + k]] += 3; } }
     for (let v = 0; v < n0; v++) if (c[v]) f[v] = a[v] / c[v]; }
   const out = new Float32Array(n), u8 = new Uint8Array(n); let on = 0;
-  for (let i = 0; i < n; i++) { const g = mm.rim && mm.rim[i] ? 0 : clamp((f[src[i]] - .4) / .25, 0, 1); out[i] = g; u8[i] = Math.round(g * 255); if (g > .5) on++; }
+  for (let i = 0; i < n; i++) { const g = mm.rim && mm.rim[i] || mm.mir && mm.mir[i] ? 0 : clamp((f[src[i]] - .4) / .25, 0, 1); out[i] = g; u8[i] = Math.round(g * 255); if (g > .5) on++; }
   return { f: out, u8, share: Math.round(on / n * 100) };
 }
 const BAKE_VS = `attribute vec3 aOrig;attribute vec3 aOrigN;attribute float aSharp;attribute float aRefl;varying vec3 vO;varying vec3 vN;varying vec2 vUv;varying float vY;varying float vSharp;varying float vRefl;varying vec3 vP;

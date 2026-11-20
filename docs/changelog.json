@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.26",
+      "date": "20 nov. 2026",
+      "items": [
+        "Ta voiture scannée a maintenant ses rétroviseurs : Vigie les pose au pied du pare-brise, à la bonne place, et les peint avec tes propres images",
+        "Leur image ne bave plus sur la portière ni sur le montant du pare-brise",
+        "Refais ton scan pour en profiter"
+      ]
+    },
+    {
       "version": "0.25",
       "date": "20 nov. 2026",
       "items": [
