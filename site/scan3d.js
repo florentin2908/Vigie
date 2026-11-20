@@ -758,12 +758,14 @@ function morph3(occ, n, grow) { // dilatation (grow) ou érosion d'un cube, vois
     a = b; }
   return a;
 }
-function carveAligned(cams, masks, SW, SH, fpx, S, sh, tol) {
+function carveAligned(cams, masks, SW, SH, fpx, S, sh, tol, tol2) {
   const { alpha, cx, cz, L, W, H } = sh, ca = Math.cos(alpha), sa = Math.sin(alpha), m = .15;
   const nx = Math.ceil((L + 2 * m) / CELL), ny = Math.ceil((H + m) / CELL), nz = Math.ceil((W + 2 * m) / CELL);
   const a0 = -nx * CELL / 2, b0 = -nz * CELL / 2;
   const n = GRID, { R, Y } = S.box, near = morph3(S.occ, n, true), sure = morph3(morph3(S.occ, n, false), n, false);
   const occ = new Uint8Array(nx * ny * nz), nv = cams.length, maxOut = tol != null ? tol : Math.max(2, Math.round(nv * .07));
+  const occ2 = tol2 != null ? new Uint8Array(nx * ny * nz) : null, lim = occ2 ? Math.max(maxOut, tol2) : maxOut;   // occ2 : forme plus tolérante (v0.25)
+  const near2 = occ2 ? morph3(near, n, true) : null;   // la forme grossière a pu être creusée aussi : un cube de plus autour
   const order = []; for (let s = 0; s < 8; s++) for (let i = s; i < nv; i += 8) order.push(i);
   for (let k = 0; k < nz; k++) { const b = b0 + (k + .5) * CELL;
     for (let j = 0; j < ny; j++) { const wy = (j + .5) * CELL; if (wy < .03) continue; const gy = Math.floor(wy / Y * n); if (gy >= n) continue;
@@ -771,17 +773,17 @@ function carveAligned(cams, masks, SW, SH, fpx, S, sh, tol) {
         const a = a0 + (i + .5) * CELL, wx = cx + a * ca - b * sa, wz = cz + a * sa + b * ca;
         const gx = Math.floor((wx / R + 1) / 2 * n), gz = Math.floor((wz / R + 1) / 2 * n);
         if (gx < 0 || gz < 0 || gx >= n || gz >= n) continue;
-        const g = (gz * n + gy) * n + gx; if (!near[g]) continue;
-        if (sure[g]) { occ[(k * ny + j) * nx + i] = 1; continue; }   // bien à l'intérieur de la forme grossière
+        const g = (gz * n + gy) * n + gx, nr = near[g]; if (!nr && !(near2 && near2[g])) continue;
+        if (sure[g]) { occ[(k * ny + j) * nx + i] = 1; if (occ2) occ2[(k * ny + j) * nx + i] = 1; continue; }   // bien à l'intérieur de la forme grossière
         let out = 0, seen = 0;
         for (const v of order) { const c = cams[v], qx = wx - c.C[0], qy = wy - c.C[1], qz = wz - c.C[2];
           const zc = qx * c.f[0] + qy * c.f[1] + qz * c.f[2]; if (zc < .3) continue;
           const u = SW / 2 + fpx * (qx * c.r[0] + qy * c.r[1] + qz * c.r[2]) / zc, w = SH / 2 - fpx * (qx * c.u[0] + qy * c.u[1] + qz * c.u[2]) / zc;
           if (u < 0 || w < 0 || u >= SW || w >= SH) continue;
-          seen++; if (!masks[v][(w | 0) * SW + (u | 0)]) { if (++out > maxOut) break; } }
-        if (out <= maxOut && seen >= nv * .35) occ[(k * ny + j) * nx + i] = 1;
+          seen++; if (!masks[v][(w | 0) * SW + (u | 0)]) { if (++out > lim) break; } }
+        if (seen >= nv * .35) { if (nr && out <= maxOut) occ[(k * ny + j) * nx + i] = 1; if (occ2 && out <= tol2) occ2[(k * ny + j) * nx + i] = 1; }
       } } }
-  return { occ, nx, ny, nz, a0, b0 };
+  return { occ, occ2, nx, ny, nz, a0, b0 };
 }
 function largestComp3(occ, nx, ny, nz) {
   const lab = new Int32Array(occ.length).fill(-1), st = [], NXY = nx * ny; let best = -1, bestN = 0, id = 0;
@@ -873,9 +875,31 @@ function tautSides(g, nx, ny, nz, mid, jMin) {
 // boucliers. v0.24 : haut et bas mesurés au dixième de millimètre ; profils et pente des vitres rendus à la carrosserie
 // lisse (maquetteMesh), qui remplace le champ rastérisé ci-dessous (gardé pour le sens de la voiture et en repli).
 const MQ = { taubin: 10, normales: 8, sigma: 9, rb: .07, rs: .025, rr: .055, rt: .13, ledge: .035, crown: .015, tanMin: Math.tan(10 * Math.PI / 180), tanMax: Math.tan(20 * Math.PI / 180), rPlan: .18, rTop: .12, rBot: .1 };
+// Toit creusé par quelques images (v0.25) : une partie n'est gardée que si au plus 3 % des images la voient hors de la
+// voiture ; quand le détourage rate le haut sombre de la voiture (toit noir, becquet, lunette devant des immeubles) sur
+// 2 ou 3 images, le bout du toit est creusé (vidéo de test : arrière d'un break 9 à 14 cm trop bas sur 70 cm, profil de
+// berline). Une 2e forme plus tolérante (8 % des images) est sculptée en même temps ; au milieu de la largeur, l'écart de
+// hauteur entre les deux formes, moins l'écart habituel (1er quartile sur le toit : la « tente » de la forme tolérante), relève
+// le haut de chaque tranche, sur le dessus de la voiture seulement, de 15 cm au plus.
+function roofLift(top0, topT, nx, nz, mid) {
+  const k0 = Math.max(0, Math.floor(mid - 6)), k1 = Math.min(nz - 1, Math.ceil(mid + 6)), h0 = new Float32Array(nx).fill(-1), hT = new Float32Array(nx).fill(-1);
+  for (let i = 0; i < nx; i++) for (let k = k0; k <= k1; k++) { h0[i] = Math.max(h0[i], top0[k * nx + i]); hT[i] = Math.max(hT[i], topT[k * nx + i]); }
+  let hMax = 0; for (let i = 0; i < nx; i++) hMax = Math.max(hMax, h0[i]);
+  const roof = [], d = new Float32Array(nx).fill(NaN);
+  for (let i = 0; i < nx; i++) { if (h0[i] < .75 * hMax || hT[i] < 0) continue; d[i] = hT[i] - h0[i]; if (h0[i] >= .9 * hMax) roof.push(d[i]); }
+  if (roof.length < 20) return null;
+  roof.sort((a, b) => a - b); const bias = roof[Math.floor(roof.length / 4)], lift = new Float32Array(nx), lim = .15 / CELL; let n = 0, mx = 0;
+  const raw = new Float32Array(nx);   // médiane sur 5 tranches, puis moyenne gaussienne (4 tranches) : pas de marches de 2,5 cm
+  for (let i = 0; i < nx; i++) { if (isNaN(d[i])) continue; const a = []; for (let e = -2; e <= 2; e++) if (i + e >= 0 && i + e < nx && !isNaN(d[i + e])) a.push(d[i + e]);
+    raw[i] = clamp(median(a) - bias, 0, lim); }
+  for (let i = 0; i < nx; i++) { if (isNaN(d[i])) continue; let sm = 0, w = 0;
+    for (let e = -12; e <= 12; e++) { const j = i + e; if (j < 0 || j >= nx) continue; const g = Math.exp(-e * e / 32); sm += g * raw[j]; w += g; }
+    const v = sm / w; lift[i] = v * CELL; if (v > .1) n++; if (v > mx) mx = v; }
+  return { lift, info: { biaisCm: Math.round(bias * CELL * 100), tranches: n, maxCm: Math.round(mx * CELL * 100) } };
+}
 function maquetteField(D, sill) {
   const { nx, ny, nz, cell, field: F, b0, bc } = D, kmid = (bc - b0) / cell - .5, NXY = nx * ny;
-  const W = new Float32Array(nx * ny).fill(-1), top = new Float32Array(nx).fill(NaN), bot = new Float32Array(nx).fill(NaN);
+  const LF = D.lift || new Float32Array(nx), W = new Float32Array(nx * ny).fill(-1), top = new Float32Array(nx).fill(NaN), bot = new Float32Array(nx).fill(NaN);
   const pc = new Float32Array(ny), pe = new Float32Array(ny);   // par rangée : plus forte valeur au milieu (±6 colonnes) et sur la moitié
   for (let i = 0; i < nx; i++) {
     let jt = -1, jb = ny;
@@ -888,7 +912,7 @@ function maquetteField(D, sill) {
       pc[j] = mc; pe[j] = me; if (mc >= 128) jt = j;
     }
     // v0.24 : haut et bas pris là où la forme passe 127,5 entre deux cubes (au dixième de millimètre, plus en marches de 2,5 cm)
-    if (jt >= 0) { top[i] = (jt + .5 + (jt + 1 < ny ? (pc[jt] - 127.5) / Math.max(1, pc[jt] - pc[jt + 1]) : .5)) * cell;
+    if (jt >= 0) { top[i] = (jt + .5 + (jt + 1 < ny ? (pc[jt] - 127.5) / Math.max(1, pc[jt] - pc[jt + 1]) : .5)) * cell + LF[i];
       bot[i] = jb > 0 && jb < ny ? (jb - .5 + clamp((127.5 - pe[jb - 1]) / Math.max(1, pe[jb] - pe[jb - 1]), 0, 1)) * cell : jb * cell; }
   }
   const yv = j => (j + .5) * cell, av = i => D.a0 + (i + .5) * cell;
@@ -938,7 +962,7 @@ function maquetteField(D, sill) {
   // pente des vitres de côté (mesurée sur les tranches d'habitacle, bornée, lissée) pour la carrosserie lisse
   const tgRaw = new Float32Array(nx).fill(NaN);
   for (let i = i0; i <= i1; i++) { const t = T[i], w = WB[i]; if (isNaN(t) || isNaN(w)) continue;
-    const h = t - belt(av(i)), f = clamp(h / .25, 0, 1), jj = Math.floor((t - .12) / cell); if (h < .1 || f < .5 || jj < 0 || jj >= ny || !(W[i * ny + jj] > 0)) continue;
+    const h = t - belt(av(i)), f = clamp(h / .25, 0, 1), jj = Math.floor((t - LF[i] - .12) / cell); if (h < .1 || f < .5 || jj < 0 || jj >= ny || !(W[i * ny + jj] > 0)) continue;
     tgRaw[i] = clamp((w - MQ.ledge * f - W[i * ny + jj]) / h, MQ.tanMin, MQ.tanMax); }
   const coupes = { i0, i1, T: Float32Array.from(T), B: Float32Array.from(B), WB: Float32Array.from(WB), TG: droite(tgRaw, 4), ka, kb, sill: sill || 0 };
   for (const [ie, dir] of [[i0, 1], [i1, -1]]) {
@@ -953,7 +977,7 @@ function maquetteField(D, sill) {
     const t = T[i], b = Math.max(B[i], sill || 0), w = WB[i]; if (isNaN(t) || isNaN(w) || t - b < .1) continue;
     const bl = belt(av(i)), h = t - bl, f = clamp(h / .25, 0, 1);   // f : part d'habitacle (0 sur le capot et le coffre)
     let wg0 = w, wg1 = w, rr = Math.min(MQ.rt, (t - b) / 3);
-    if (h > .02) { wg0 = w - MQ.ledge * f; const jj = Math.floor((t - .12) / cell), wm = jj >= 0 && jj < ny && W[i * ny + jj] > 0 ? W[i * ny + jj] : wg0;
+    if (h > .02) { wg0 = w - MQ.ledge * f; const jj = Math.floor((t - LF[i] - .12) / cell), wm = jj >= 0 && jj < ny && W[i * ny + jj] > 0 ? W[i * ny + jj] : wg0;
       wg1 = wg0 - f * clamp(wg0 - wm, h * MQ.tanMin, h * MQ.tanMax); rr = MQ.rr + (1 - f) * (MQ.rt - MQ.rr); if (f > .5) cab++; }
     const rb = Math.min(MQ.rb, (t - b) / 3), rs = MQ.rs, top0 = Math.min(bl, t);
     const half = y => {   // demi-largeur de la coupe à la hauteur y
@@ -1339,8 +1363,13 @@ async function scanFrames(F, opts, progress) {
   // les caméras calées (une partie est retirée dès que 3 % des images la voient hors de la voiture), puis symétrie
   progress('carve', .93); await tick();
   const tolFine = opts.tolFix != null ? opts.tolFix : calee ? Math.max(1, Math.round(camsTex.length * (opts.tolFine ?? .03))) : undefined;
-  const fine = carveAligned(camsTex, dm, SW, SH, fpx, S, S.shape, tolFine);
+  const tolToit = opts.toitTol === false || tolFine == null ? null : Math.max(tolFine + 2, Math.round(camsTex.length * (typeof opts.toitTol === 'number' ? opts.toitTol : .08)));
+  const fine = carveAligned(camsTex, dm, SW, SH, fpx, S, S.shape, tolFine, tolToit);
   const { nx, ny, nz } = fine, fo = largestComp3(fine.occ, nx, ny, nz);
+  const topCols = occ => { const t = new Int16Array(nx * nz).fill(-1);   // plus haut cube plein de chaque colonne (i, k)
+    for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) for (let j = ny - 1; j >= 0; j--) if (occ[(k * ny + j) * nx + i]) { t[k * nx + i] = j; break; }
+    return t; };
+  const top0 = topCols(fo), topT = fine.occ2 ? topCols(largestComp3(fine.occ2, nx, ny, nz)) : null;
   q.fine = { roofCut: flattenRoof(fo, nx, ny, nz) };
   const ff = new Float32Array(fo.length); let fv = 0; for (let i = 0; i < ff.length; i++) { ff[i] = fo[i]; fv += fo[i]; }
   if (fv < 5000) { const e = new Error('forme'); e.quality = q; throw e; }
@@ -1354,6 +1383,7 @@ async function scanFrames(F, opts, progress) {
     if (v >= .5) { if (i < i0) i0 = i; if (i > i1) i1 = i; if (j > j1) j1 = j; if (k < k0) k0 = k; if (k > k1) k1 = k; } }
   const disp = { nx, ny, nz, cell: CELL, a0: fine.a0, b0: fine.b0, field: f8,
     ac: fine.a0 + ((i0 + i1) / 2 + .5) * CELL, bc: fine.b0 + (sym.mid + .5) * CELL };
+  if (topT) { const r = roofLift(top0, topT, nx, nz, sym.mid); if (r) { disp.lift = r.lift; q.fine.toitReleve = r.info; } }
   const dims = { L: (i1 - i0 + 1) * CELL, W: (k1 - k0 + 1) * CELL, H: (j1 + 1) * CELL };
   // Roues : contacts au sol vus de profil (sinon bas de la forme), rayon d'après la hauteur ; passages de roue creusés
   // (le pneu et la jante sont ajoutés ensuite)

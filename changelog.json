@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.25",
+      "date": "20 nov. 2026",
+      "items": [
+        "Ta voiture scannée garde sa vraie silhouette : quand quelques images ratent le haut sombre de la voiture (toit noir, becquet, lunette devant un décor sombre), le bout du toit n'est plus creusé. Un break reste un break, au lieu de prendre un arrière de berline",
+        "Toit et pare-brise plus justes : sur la vidéo de test, la forme est 9 % plus proche de la vraie voiture (dessus 20 % plus juste), et le toit est encore plus lisse",
+        "Refais ton scan pour en profiter"
+      ]
+    },
+    {
       "version": "0.24",
       "date": "19 nov. 2026",
       "items": [
