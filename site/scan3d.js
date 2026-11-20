@@ -878,7 +878,7 @@ const MQ = { taubin: 10, normales: 8, sigma: 9, rb: .07, rs: .025, rr: .055, rt:
 // Toit creusé par quelques images (v0.25) : une partie n'est gardée que si au plus 3 % des images la voient hors de la
 // voiture ; quand le détourage rate le haut sombre de la voiture (toit noir, becquet, lunette devant des immeubles) sur
 // 2 ou 3 images, le bout du toit est creusé (vidéo de test : arrière d'un break 9 à 14 cm trop bas sur 70 cm, profil de
-// berline). Une 2e forme plus tolérante (8 % des images) est sculptée en même temps ; au milieu de la largeur, l'écart de
+// berline). Une 2e forme plus tolérante (12 % des images depuis v0.29, 8 % avant) est sculptée en même temps ; au milieu de la largeur, l'écart de
 // hauteur entre les deux formes, moins l'écart habituel (1er quartile sur le toit : la « tente » de la forme tolérante), relève
 // le haut de chaque tranche, sur le dessus de la voiture seulement, de 15 cm au plus.
 function roofLift(top0, topT, nx, nz, mid) {
@@ -1363,7 +1363,7 @@ async function scanFrames(F, opts, progress) {
   // les caméras calées (une partie est retirée dès que 3 % des images la voient hors de la voiture), puis symétrie
   progress('carve', .93); await tick();
   const tolFine = opts.tolFix != null ? opts.tolFix : calee ? Math.max(1, Math.round(camsTex.length * (opts.tolFine ?? .03))) : undefined;
-  const tolToit = opts.toitTol === false || tolFine == null ? null : Math.max(tolFine + 2, Math.round(camsTex.length * (typeof opts.toitTol === 'number' ? opts.toitTol : .08)));
+  const tolToit = opts.toitTol === false || tolFine == null ? null : Math.max(tolFine + 2, Math.round(camsTex.length * (typeof opts.toitTol === 'number' ? opts.toitTol : .12)));
   const fine = carveAligned(camsTex, dm, SW, SH, fpx, S, S.shape, tolFine, tolToit);
   const { nx, ny, nz } = fine, fo = largestComp3(fine.occ, nx, ny, nz);
   const topCols = occ => { const t = new Int16Array(nx * nz).fill(-1);   // plus haut cube plein de chaque colonne (i, k)

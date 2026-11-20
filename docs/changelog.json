@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.29",
+      "date": "20 nov. 2026",
+      "items": [
+        "Ta voiture scannée a une forme encore plus juste : le toit, le hayon et l'avant collent mieux à ta vraie voiture (sur la vidéo de test, 5 à 9 % plus proche selon la façon de filmer)",
+        "Refais ton scan pour en profiter"
+      ]
+    },
+    {
       "version": "0.28",
       "date": "20 nov. 2026",
       "items": [
