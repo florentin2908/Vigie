@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.28",
+      "date": "20 nov. 2026",
+      "items": [
+        "Vitres de ta voiture scannée plus naturelles : le reflet de la lumière du studio ne fait plus de grande tache blanche, il reste doux comme sur du vrai verre teinté",
+        "Pas besoin de refaire ton scan : ta voiture déjà scannée en profite tout de suite"
+      ]
+    },
+    {
       "version": "0.27",
       "date": "20 nov. 2026",
       "items": [

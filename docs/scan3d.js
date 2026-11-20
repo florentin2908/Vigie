@@ -2056,6 +2056,8 @@ function scanPatch(sh) {
 	#endif
 	material.roughness=mix(mix(0.75,material.roughness,vigieGloss),mix(0.16,0.07,uMaq),vGlass);`)
     .replace('#include <opaque_fragment>', `#include <opaque_fragment>
+	{float gM=smoothstep(0.4,0.6,vGlass),hm=max(gl_FragColor.r,max(gl_FragColor.g,gl_FragColor.b));   // v0.28 : vitres, hautes lumières comprimées (matériau sans
+	 if(hm>0.35){float e=hm-0.35;gl_FragColor.rgb*=mix(1.0,(0.35+e/(1.0+e*2.2))/hm,gM);}}   // compression du rendu : le reflet du studio saturait en grande tache blanche)
 	gl_FragColor.rgb=mix(gl_FragColor.rgb,gl_FragColor.rgb*0.55+vec3(0.1,0.22,0.3),uScan*0.35)+vec3(0.45,0.92,1.0)*exp(-abs(uReveal-vSY)*28.0)*uScan*2.4;`);
 }
 const LOOK = { env: .55, spec: .5, rough: .38, coat: 1, coatRough: .08, emi: 1.15, maq: 1, envMaq: 1.1 };   // vernis plein (v0.19) ; maq : peinture de studio (v0.23)
