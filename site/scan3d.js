@@ -1435,7 +1435,7 @@ async function scanFrames(F, opts, progress) {
     const views = vis.map((i, j) => ({ img: F.bigs[i], mask: erode1(masks[i], SW, SH), cam: camsTex[j], gain: 1 }));
     const lin = c => Math.pow(c, 2.2), lumRef = .3 * lin(paint[0]) + .59 * lin(paint[1]) + .11 * lin(paint[2]);
     const tb = performance.now();
-    const bk = await bakeTexture(THREE, mm, views, { size: 2048, SW, SH, fN: [fpx / SW, fpx / SH], paint, roof, H: dims.H, lumRef, wheels: m.wheels, soft: opts.soft, progress: k => progress('paint', k) });
+    const bk = await bakeTexture(THREE, mm, views, { size: 2048, SW, SH, fN: [fpx / SW, fpx / SH], paint, roof, H: dims.H, lumRef, wheels: m.wheels, soft: opts.soft, net: opts.net, progress: k => progress('paint', k) });
     const tex = bk.blob; mm.glass = bk.glass;
     if (beltLine && mm.glass) { const fl = m0.flip, P = mm.pos;   // bas des vitres = ligne de ceinture mesurée ; pas de vitre sur le capot ni le coffre
       for (let v = 0; v < mm.glass.length; v++) { const a = P[v * 3] * fl + disp.ac, yb = beltLine[0] * a + beltLine[1], y = P[v * 3 + 1], si = clamp(Math.floor((a - disp.a0) / CELL), 0, nx - 1);
@@ -1840,6 +1840,23 @@ float seen(out vec2 im){vec3 n=normalize(vN);vec3 q=vO-uC;float zc=dot(q,uF);if(
   if(zc>texture2D(uDep,im).r+0.04)return -1.0;              // caché par une autre partie de la voiture
   if(texture2D(uMsk,im).r<0.5)return -1.0;                  // hors de la silhouette : décor
   return c;}`;
+// Accentuation de la texture (v0.27) : la vidéo du téléphone donne environ 1 pixel par centimètre de voiture, moins que ce
+// que l'écran montre de près ; un masque flou (couleur + k × (couleur − flou)) rend leur netteté aux joncs, poignées,
+// arêtes et feux. Flou : 2 passes de moyenne en boîte de rayon r texels ; seuil s pour ne pas grossir le bruit.
+const NET = { r: 4, k: 1, s: 2 };
+function sharpenTex(px, size, o) {
+  const n = size * size, r = o.r, L = new Float32Array(n), T = new Float32Array(n);
+  const box = (src, dst, horiz) => { for (let a = 0; a < size; a++) { let acc = 0, cnt = 0;
+    const at = b => horiz ? a * size + b : b * size + a;
+    for (let b = 0; b < r; b++) { acc += src[at(b)]; cnt++; }
+    for (let b = 0; b < size; b++) { if (b + r < size) { acc += src[at(b + r)]; cnt++; } if (b - r - 1 >= 0) { acc -= src[at(b - r - 1)]; cnt--; } dst[at(b)] = acc / cnt; } } };
+  for (let c = 0; c < 3; c++) {
+    for (let i = 0; i < n; i++) L[i] = px[i * 4 + c];
+    box(L, T, true); box(T, L, false); box(L, T, true); box(T, L, false);
+    for (let i = 0; i < n; i++) { if (px[i * 4 + 3] === 0) continue; const v = px[i * 4 + c], d = v - L[i];
+      if (Math.abs(d) > o.s) px[i * 4 + c] = clamp(Math.round(v + o.k * (d - Math.sign(d) * o.s)), 0, 255); }
+  }
+}
 async function bakeTexture(THREE, mm, views, opts) {
   const size = opts.size || 2048;
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 4;
@@ -1982,6 +1999,7 @@ async function bakeTexture(THREE, mm, views, opts) {
     const px = new Uint8Array(size * size * 4); renderer.readRenderTargetPixels(a, 0, 0, size, size, px);
     let cov = 0, lit = 0; for (let i = 0; i < px.length; i += 4 * 97) if (px[i + 3] > 0) { cov++; if (px[i] + px[i + 1] + px[i + 2] > 6) lit++; }
     if (shaderErr || cov < size * size / 97 * .05 || lit < cov * .2) throw new Error(shaderErr ? 'shader' : 'texture vide');
+    if (opts.net !== false) sharpenTex(px, size, Object.assign({}, NET, opts.net));
     const out = document.createElement('canvas'); out.width = out.height = size; const og = out.getContext('2d'), img = og.createImageData(size, size);
     for (let y = 0; y < size; y++) img.data.set(px.subarray((size - 1 - y) * size * 4, (size - y) * size * 4), y * size * 4);   // haut de l'image = v = 1
     for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;

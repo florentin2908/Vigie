@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.27",
+      "date": "20 nov. 2026",
+      "items": [
+        "Ta voiture scannée est plus nette de près : les joncs des vitres, les poignées, les arêtes de la carrosserie et les feux ressortent mieux",
+        "Vigie affine la peinture tirée de ta vidéo, comme l'appareil photo de ton téléphone, sans ajouter de grain",
+        "Refais ton scan pour en profiter"
+      ]
+    },
+    {
       "version": "0.26",
       "date": "20 nov. 2026",
       "items": [
