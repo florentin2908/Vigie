@@ -1012,6 +1012,7 @@ function maquetteField(D, sill) {
 // Points par morceau de demi-coupe : fond, arrondi du bas, flanc bas (ou paroi du passage de roue), voûte de l'arche,
 // flanc, épaulement, rebord, vitres, arête du toit, toit.
 const LOFT = { n: [7, 6, 6, 5, 14, 7, 2, 14, 7, 16], gap: .035, depth: .27, archDeg: 6, endDeg: 7.5, cap: 5, crease: Math.cos(Math.PI / 4) };
+const smooth01 = t => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 function maquetteMesh(D, C, wheels, align) {
   const { cell, a0, ac, bc } = D, { i0, i1, ka, kb } = C, nS = i1 - i0 + 1;
   if (nS < 20) return null;
@@ -1030,7 +1031,11 @@ function maquetteMesh(D, C, wheels, align) {
       if (d < MQ.rPlan) w = Math.min(w, e.w - circ(MQ.rPlan, d));
       if (d < MQ.rTop) t = Math.min(t, e.t - circ(MQ.rTop, d));
       if (d < MQ.rBot) b = Math.max(b, e.b + circ(MQ.rBot, d)); }
-    b = Math.max(b, C.sill); return { w, t, b: Math.min(b, t - .2), tg: TG ? at(TG, x) : MQ.tanMin }; };
+    b = Math.max(b, C.sill);
+    // v0.30 : tout le bas de la carrosserie (bas de caisse et boucliers) descendu de l'erreur de calage mesurée par les
+    // contacts des pneus ; la courbe des boucliers est gardée
+    if (C.sillLow != null && C.sillLow < C.sill) b = Math.max(C.sillLow, b - (C.sill - C.sillLow));
+    return { w, t, b: Math.min(b, t - .2), tg: TG ? at(TG, x) : MQ.tanMin }; };
   const N = LOFT.n, NH = N.reduce((a, n) => a + n + 1, 0), NR = 2 * NH - 2;
   // Demi-coupe (z ≥ 0), du milieu du dessous au milieu du toit : NH points [z, y]. notch : passage de roue (paroi zin, haut de l'arche yArc)
   const half = (x, notch, rNear) => {
@@ -1395,7 +1400,7 @@ async function scanFrames(F, opts, progress) {
       const zo = xa => { const i = clamp(Math.round((xa - disp.a0) / CELL - .5), 0, nx - 1), j = Math.min(ny - 1, Math.round(rP / CELL - .5)); let km = -1;
         for (let k = nz - 1; k >= 0; k--) if (disp.field[(k * ny + j) * nx + i] >= 128) { km = k; break; }
         return km < 0 ? dims.W / 2 - .06 : (disp.b0 + (km + .5) * CELL) - disp.bc - .025; };
-      wd = { wheels: [{ xa: fa, r: rP, zo: zo(fa) }, { xa: ra, r: rP, zo: zo(ra) }], sill: ws && ws.sill != null ? clamp(ws.sill, 0, .45) : wd ? wd.sill : 0, source: ws ? 'vues de côté (' + ws.nF + ' + ' + ws.nR + ' contacts)' : 'forme' };
+      wd = { wheels: [{ xa: fa, r: rP, zo: zo(fa) }, { xa: ra, r: rP, zo: zo(ra) }], sill: ws && ws.sill != null ? clamp(ws.sill, 0, .45) : wd ? wd.sill : 0, sillLow: ws && ws.sillLow != null ? clamp(ws.sillLow, .05, .45) : null, source: ws ? 'vues de côté (' + ws.nF + ' + ' + ws.nR + ' contacts)' : 'forme' };
     } else wd = null; }
   // Dessous (v0.21) : jamais vu par le téléphone (plus haut que lui), la forme sculptée y descend jusqu'au sol. Elle est
   // coupée à plat à la hauteur du bas de caisse, entre les roues comme aux bouts (les pneus sont ajoutés ensuite).
@@ -1404,8 +1409,8 @@ async function scanFrames(F, opts, progress) {
       for (let i = 0; i < nx; i++) { const q = (k * ny + j) * nx + i; const v = Math.round(F8[q] * t); if (F8[q] >= 128 && v < 128) cutS++; F8[q] = v; } }
     q.fine.sousCut = cutS; }
   let beltLine = null, coupes = null;
-  if (opts.maquette !== false) { const mqr = maquetteField(disp, wd ? wd.sill : 0); if (mqr) { beltLine = mqr.belt; coupes = mqr.coupes; delete mqr.belt; delete mqr.coupes; } q.fine.maquette = mqr; }
-  if (wd) { carveWells(disp, wd.wheels); q.roues = { rayonsCm: wd.wheels.map(w => Math.round(w.r * 100)), empattementCm: Math.round((wd.wheels[0].xa - wd.wheels[1].xa) * 100), basDeCaisseCm: Math.round(wd.sill * 100), source: wd.source }; }
+  if (opts.maquette !== false) { const mqr = maquetteField(disp, wd ? wd.sill : 0); if (mqr) { beltLine = mqr.belt; coupes = mqr.coupes; if (wd && wd.sillLow != null && opts.basVrai !== false) coupes.sillLow = wd.sillLow; delete mqr.belt; delete mqr.coupes; } q.fine.maquette = mqr; }
+  if (wd) { carveWells(disp, wd.wheels); q.roues = { rayonsCm: wd.wheels.map(w => Math.round(w.r * 100)), empattementCm: Math.round((wd.wheels[0].xa - wd.wheels[1].xa) * 100), basDeCaisseCm: Math.round(wd.sill * 100), basVraiCm: wd.sillLow != null ? Math.round(wd.sillLow * 100) : null, source: wd.source }; }
   else q.roues = 'non trouvées';
   Object.assign(q.fine, { voxels: fv, grid: [nx, ny, nz], symPlaneCm: Math.round((disp.bc - (fine.b0 + nz * CELL / 2)) * 100) });
   progress('carve', 1);
@@ -1632,7 +1637,7 @@ function detectWheels(D, ext) {
 // si la voiture dépasse du cadre). Chaque point le plus bas est ramené sur le sol (rayon de la caméra jusqu'à y = 0),
 // donc à sa vraie place le long de la voiture ; médiane sur toutes les vues de côté.
 function wheelsFromSides(vis, cams, masks, SW, SH, fpx, align, ac, dims) {
-  const ca = Math.cos(align.alpha), sa = Math.sin(align.alpha), F = [], R = [], SL = [];
+  const ca = Math.cos(align.alpha), sa = Math.sin(align.alpha), F = [], R = [], SL = [], SLc = [];
   for (let j = 0; j < vis.length; j++) { const c = cams[j];
     const dx = align.cx - c.C[0], dz = align.cz - c.C[2], da = dx * ca + dz * sa, db = -dx * sa + dz * ca, dd = Math.hypot(da, db);
     if (Math.abs(db) / dd < .77) continue;                                          // vues de côté (±40°)
@@ -1640,7 +1645,7 @@ function wheelsFromSides(vis, cams, masks, SW, SH, fpx, align, ac, dims) {
     for (let x = 0; x < SW; x++) for (let y = SH - 1; y >= 0; y--) if (m[y * SW + x]) { yb[x] = y; break; }
     const ys = Float32Array.from(yb);
     for (let x = 2; x < SW - 2; x++) if (yb[x - 2] >= 0 && yb[x + 2] >= 0) ys[x] = median([yb[x - 2], yb[x - 1], yb[x], yb[x + 1], yb[x + 2]]);
-    const rp = Math.max(4, Math.round(fpx * .32 / Math.max(1.5, dd - dims.W / 4))), rise = Math.max(2, .25 * rp), cps = [];
+    const rp = Math.max(4, Math.round(fpx * .32 / Math.max(1.5, dd - dims.W / 4))), rise = Math.max(2, .25 * rp), cps = [], cys = [];
     for (let x = 0; x < SW; x++) { const y0 = ys[x]; if (y0 < 0 || y0 >= SH - 2) continue;        // bas du pneu hors cadre
       let top = true; for (let k = Math.max(0, x - rp); k <= Math.min(SW - 1, x + rp) && top; k++) if (ys[k] > y0) top = false;
       if (!top) continue;
@@ -1652,17 +1657,23 @@ function wheelsFromSides(vis, cams, masks, SW, SH, fpx, align, ac, dims) {
       const dir = [0, 1, 2].map(k => c.f[k] + rx * c.r[k] + uy * c.u[k]);
       if (dir[1] < -1e-3) { const t = -c.C[1] / dir[1], gx = c.C[0] + t * dir[0] - align.cx, gz = c.C[2] + t * dir[2] - align.cz;
         const a = gx * ca + gz * sa, b = -gx * sa + gz * ca;
-        if (Math.abs(b) < dims.W / 2 + .3 && Math.abs(a - ac) < dims.L / 2) { (a > ac ? F : R).push(a); cps.push(px); } }
+        if (Math.abs(b) < dims.W / 2 + .3 && Math.abs(a - ac) < dims.L / 2) { (a > ac ? F : R).push(a); cps.push(px); cys.push(y0 + .75); } }
       x += rp; }
     // Bas de caisse (v0.21) : entre les deux pneus, le bas de la silhouette est le bord inférieur du flanc proche ; son rayon
     // est arrêté sur le plan de ce flanc (demi-largeur), ce qui donne sa hauteur
     if (cps.length >= 2) { const p1 = Math.min(...cps), p2 = Math.max(...cps), bs = db > 0 ? -dims.W / 2 : dims.W / 2;
+      // v0.30 : les contacts des pneus de cette vue, ramenés de la même façon (plan du pneu, 10 cm en retrait du flanc),
+      // devraient tomber à 0 ; leur hauteur mesure l'erreur de calage de la vue (tangage, hauteur) : bas de caisse corrigé
+      const hs = []; cps.forEach((px, n) => { const rx = (px + .5 - SW / 2) / fpx, uy = (SH / 2 - cys[n]) / fpx, dir = [0, 1, 2].map(k => c.f[k] + rx * c.r[k] + uy * c.u[k]);
+        const bC = -(c.C[0] - align.cx) * sa + (c.C[2] - align.cz) * ca, bD = -dir[0] * sa + dir[2] * ca; if (Math.abs(bD) < 1e-6) return;
+        const t = (bs - Math.sign(bs) * .1 - bC) / bD; if (t > 0) hs.push(c.C[1] + t * dir[1]); });
+      const off = hs.length >= 2 ? clamp(median(hs), -.15, .15) : null;
       if (p2 - p1 > 4 * rp) for (let x = Math.round(p1 + .3 * (p2 - p1)); x <= p1 + .7 * (p2 - p1); x += 2) { if (ys[x] < 0) continue;
         const rx = (x + .5 - SW / 2) / fpx, uy = (SH / 2 - (ys[x] + 1)) / fpx, dir = [0, 1, 2].map(k => c.f[k] + rx * c.r[k] + uy * c.u[k]);
         const bC = -(c.C[0] - align.cx) * sa + (c.C[2] - align.cz) * ca, bD = -dir[0] * sa + dir[2] * ca; if (Math.abs(bD) < 1e-6) continue;
-        const t = (bs - bC) / bD; if (t > 0) SL.push(c.C[1] + t * dir[1]); } } }
+        const t = (bs - bC) / bD; if (t > 0) { SL.push(c.C[1] + t * dir[1]); if (off != null) SLc.push(c.C[1] + t * dir[1] - off); } } } }
   if (F.length < 3 || R.length < 3) return null;
-  return { front: median(F), rear: median(R), nF: F.length, nR: R.length, sill: SL.length >= 20 ? median(SL) : null, nSill: SL.length };
+  return { front: median(F), rear: median(R), nF: F.length, nR: R.length, sill: SL.length >= 20 ? median(SL) : null, sillLow: SLc.length >= 20 ? median(SLc) : null, nSill: SL.length };
 }
 // Passages de roue : on creuse la forme autour de chaque roue (rayon + 3,5 cm), du flanc vers l'intérieur (27 cm)
 function carveWells(D, wheels) {

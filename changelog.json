@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.30",
+      "date": "21 nov. 2026",
+      "items": [
+        "Ta voiture scannée est posée à sa vraie hauteur : le bas de caisse et les boucliers ne flottent plus 10 cm au-dessus du sol",
+        "Vigie se sert de l'endroit où tes pneus touchent le sol, image par image, pour corriger la hauteur",
+        "Sur la vidéo de test, la forme est 13 % plus proche de la vraie voiture (avant et arrière surtout). Refais ton scan pour en profiter"
+      ]
+    },
+    {
       "version": "0.29",
       "date": "20 nov. 2026",
       "items": [
